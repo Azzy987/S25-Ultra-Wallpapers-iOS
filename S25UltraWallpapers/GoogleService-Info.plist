@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>352408897001-2tu6mi63ub2f4dmvnveg0tdmf4b3j1k4.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.352408897001-2tu6mi63ub2f4dmvnveg0tdmf4b3j1k4</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>352408897001-aqdd14qv90kdl5o3i6sd2h9ctff16lpq.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyBMvSJ5pwLFNe9-xuKuF2j5m5qtIcPEFes</string>
+	<key>GCM_SENDER_ID</key>
+	<string>352408897001</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.droidates.S25UltraWallpapers</string>
+	<key>PROJECT_ID</key>
+	<string>wallpaper-apps-cad2c</string>
+	<key>STORAGE_BUCKET</key>
+	<string>wallpaper-apps-cad2c.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:352408897001:ios:cda6f0eb6814120fd1f778</string>
+</dict>
+</plist>
