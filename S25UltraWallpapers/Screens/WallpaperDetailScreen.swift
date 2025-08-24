@@ -233,10 +233,12 @@ struct WallpaperDetailScreen: View {
                                 dragOffset = newDragOffset
                             }
                             
-                            // Load preview images immediately when starting to drag
-                            if dragOffset > 20 && previousWallpaperImage == nil {
+                            // Load preview images immediately when starting to drag (prevent multiple calls)
+                            if dragOffset > 20 && previousWallpaperImage == nil && !isLoadingPreviousPreview {
+                                isLoadingPreviousPreview = true
                                 loadPreviewImage(for: previousWallpaper, isNext: false)
-                            } else if dragOffset < -20 && nextWallpaperImage == nil {
+                            } else if dragOffset < -20 && nextWallpaperImage == nil && !isLoadingNextPreview {
+                                isLoadingNextPreview = true
                                 loadPreviewImage(for: nextWallpaper, isNext: true)
                             }
                         }

@@ -38,7 +38,7 @@ struct CategoriesScreen: View {
 
         }
         .navigationViewStyle(.stack)
-        .sheet(isPresented: $showCategoryScreen) {
+        .fullScreenCover(isPresented: $showCategoryScreen) {
             if let selectedCategory = selectedCategory {
                 CategoryScreen(category: selectedCategory)
             }
