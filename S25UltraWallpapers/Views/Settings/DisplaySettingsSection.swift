@@ -17,7 +17,16 @@ struct DisplaySettingsSection: View {
                 // Theme Selection with Segmented Control
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Image(systemName: themeManager.themeMode == .dark ? "moon.circle.fill" : "sun.max.circle.fill")
+                        Image(systemName: {
+                            switch themeManager.themeMode {
+                            case .system:
+                                return "gear.circle.fill"
+                            case .light:
+                                return "sun.max.circle.fill"
+                            case .dark:
+                                return "moon.circle.fill"
+                            }
+                        }())
                             .foregroundColor(.indigo)
                             .font(.system(size: 20))
                             .frame(width: 24)
@@ -30,6 +39,7 @@ struct DisplaySettingsSection: View {
                     }
                     
                     Picker("Theme", selection: $themeManager.themeMode) {
+                        Text("System").tag(ThemeManager.ThemeMode.system)
                         Text("Light").tag(ThemeManager.ThemeMode.light)
                         Text("Dark").tag(ThemeManager.ThemeMode.dark)
                     }
@@ -113,6 +123,8 @@ struct ThemeRow: View {
     
     private var themeIcon: String {
         switch mode {
+        case .system:
+            return "gear"
         case .light:
             return "sun.max"
         case .dark:
@@ -122,6 +134,8 @@ struct ThemeRow: View {
     
     private var themeDescription: String {
         switch mode {
+        case .system:
+            return "Follow device setting"
         case .light:
             return "Light appearance"
         case .dark:

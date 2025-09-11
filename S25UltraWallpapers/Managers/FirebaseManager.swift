@@ -13,6 +13,7 @@ class FirebaseManager: ObservableObject {
     @Published private(set) var tags: [Tag] = []
     @Published private(set) var colors: [ColorItem] = []
     @Published private(set) var isLoading = false
+    @Published private(set) var isInitialized = false
     
     private init() {
         // Configure Firestore settings BEFORE accessing the instance
@@ -67,6 +68,7 @@ class FirebaseManager: ObservableObject {
         
         group.notify(queue: .main) {
             self.isLoading = false
+            self.isInitialized = true
         }
     }
     

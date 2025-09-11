@@ -4,11 +4,12 @@ class ThemeManager: ObservableObject {
     static let shared = ThemeManager()
     
     enum ThemeMode: String, CaseIterable {
+        case system = "System"
         case light = "Light"
         case dark = "Dark"
     }
     
-    @AppStorage("themeMode") var themeMode: ThemeMode = .dark {
+    @AppStorage("themeMode") var themeMode: ThemeMode = .system {
         didSet {
             updateTheme()
         }
@@ -23,7 +24,29 @@ class ThemeManager: ObservableObject {
     }
     
     private func setupThemeObserver() {
-        // No system theme observers needed since we only support manual light/dark selection
+        // Observer for system theme changes when using system mode
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(systemThemeChanged),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        
+        // Observer for trait collection changes
+        if #available(iOS 13.0, *) {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(systemThemeChanged),
+                name: NSNotification.Name("UIApplicationDidChangeStatusBarOrientationNotification"),
+                object: nil
+            )
+        }
+    }
+    
+    @objc private func systemThemeChanged() {
+        if themeMode == .system {
+            updateTheme()
+        }
     }
     
     deinit {
@@ -33,19 +56,39 @@ class ThemeManager: ObservableObject {
     
     func updateTheme() {
         withAnimation(.easeInOut(duration: 0.3)) {
+            let newTheme: AppColorScheme
+            
             switch themeMode {
+            case .system:
+                // Follow system appearance
+                if #available(iOS 13.0, *) {
+                    let userInterfaceStyle = UIScreen.main.traitCollection.userInterfaceStyle
+                    newTheme = (userInterfaceStyle == .dark) ? AppColors.dark : AppColors.light
+                } else {
+                    newTheme = AppColors.light // Fallback for older iOS versions
+                }
             case .dark:
-                theme = AppColors.dark
+                newTheme = AppColors.dark
             case .light:
-                theme = AppColors.light
+                newTheme = AppColors.light
             }
+            
+            theme = newTheme
         }
     }
     
     private static func getInitialTheme() -> AppColorScheme {
-        let themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "dark") ?? .dark
+        let themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "system") ?? .system
         
         switch themeMode {
+        case .system:
+            // Follow system appearance
+            if #available(iOS 13.0, *) {
+                let userInterfaceStyle = UIScreen.main.traitCollection.userInterfaceStyle
+                return (userInterfaceStyle == .dark) ? AppColors.dark : AppColors.light
+            } else {
+                return AppColors.light // Fallback for older iOS versions
+            }
         case .dark:
             return AppColors.dark
         case .light:

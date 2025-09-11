@@ -22,6 +22,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
         let config = GIDConfiguration(clientID: clientId)
         GIDSignIn.sharedInstance.configuration = config
         
+        
         return true
     }
     
@@ -37,6 +38,7 @@ struct WallsApp: App {
     @StateObject private var favoritesManager = FavoritesManager.shared
     @StateObject private var themeManager = ThemeManager.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    // Removed custom splash to avoid duplicate with Launch Screen
     
     init() {
         FirebaseApp.configure()
@@ -62,7 +64,7 @@ struct WallsApp: App {
                         .environmentObject(firebaseManager)
                         .environmentObject(favoritesManager)
                         .environment(\.appTheme, themeManager.theme)
-                        .preferredColorScheme(themeManager.theme.themeType == .dark ? .dark : .light)
+                        .preferredColorScheme(colorScheme(for: themeManager.themeMode, theme: themeManager.theme))
                 } else {
                     OnboardingScreen {
                         hasCompletedOnboarding = true
@@ -70,22 +72,35 @@ struct WallsApp: App {
                     .environmentObject(firebaseManager)
                     .environmentObject(favoritesManager)
                     .environment(\.appTheme, themeManager.theme)
-                    .preferredColorScheme(themeManager.theme.themeType == .dark ? .dark : .light)
+                    .preferredColorScheme(colorScheme(for: themeManager.themeMode, theme: themeManager.theme))
                 }
             }
-                .onAppear {
-                    // Setup additional theme change observer
-                    NotificationCenter.default.addObserver(
-                        forName: NSNotification.Name("traitCollectionDidChange"),
-                        object: nil,
-                        queue: .main
-                    ) { _ in
-                        // No longer needed since we don't support system theme
-                    }
+            .onAppear {
+                // No forced window background; follow system appearance
+                
+                // Setup additional theme change observer
+                NotificationCenter.default.addObserver(
+                    forName: NSNotification.Name("traitCollectionDidChange"),
+                    object: nil,
+                    queue: .main
+                ) { _ in
+                    // Theme will auto-update through ThemeManager observers
                 }
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                    // No longer needed since we don't support system theme
-                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                // Theme will auto-update through ThemeManager observers
+            }
+        }
+    }
+    
+    private func colorScheme(for mode: ThemeManager.ThemeMode, theme: AppColorScheme) -> ColorScheme? {
+        switch mode {
+        case .system:
+            return nil // Let system decide
+        case .light:
+            return .light
+        case .dark:
+            return .dark
         }
     }
 }

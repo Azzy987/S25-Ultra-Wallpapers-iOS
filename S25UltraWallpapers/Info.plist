@@ -17,5 +17,8 @@
 			</array>
 		</dict>
 	</array>
+	<!-- Launch screen storyboard (official) -->
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
 </dict>
 </plist>
