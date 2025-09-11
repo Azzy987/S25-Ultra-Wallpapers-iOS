@@ -7,7 +7,6 @@ struct CategoriesScreen: View {
     @StateObject private var themeManager = ThemeManager.shared
     @State private var hasLoaded = false
     @State private var selectedCategory: Category?
-    @State private var showCategoryScreen = false
     
     var filteredCategories: [Category] {
         firebaseManager.categories.filter { category in
@@ -25,7 +24,6 @@ struct CategoriesScreen: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedCategory = category
-                                showCategoryScreen = true
                             }
                     }
                 }
@@ -38,10 +36,8 @@ struct CategoriesScreen: View {
 
         }
         .navigationViewStyle(.stack)
-        .fullScreenCover(isPresented: $showCategoryScreen) {
-            if let selectedCategory = selectedCategory {
-                CategoryScreen(category: selectedCategory)
-            }
+        .fullScreenCover(item: $selectedCategory) { category in
+            CategoryScreen(category: category)
         }
         .onAppear {
             // Only load categories if this is the active tab

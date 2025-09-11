@@ -34,7 +34,6 @@ struct HomeScreen: View {
     @State private var autoScrollTimer: Timer?
     @State private var showDetailScreen = false
     @State private var selectedBannerWallpaper: Wallpaper?
-    @Namespace private var bannerAnimation
     @State private var isDraggingBanner = false
     @State private var isLoadingBannerDetail = false
     
@@ -60,7 +59,7 @@ struct HomeScreen: View {
         NavigationView {
         ZStack(alignment: .bottomTrailing) {
             CustomRefreshView(showsIndicator: false) {
-                LazyVStack(spacing: 16) {
+                LazyVStack(spacing: 8) {
                     bannerSection
                     wallpaperSection
                 }
@@ -77,7 +76,7 @@ struct HomeScreen: View {
         }
         .fullScreenCover(isPresented: $showDetailScreen) {
             if let wallpaper = selectedBannerWallpaper {
-                WallpaperDetailScreen(wallpaper: wallpaper, animation: bannerAnimation, isPresented: $showDetailScreen)
+                WallpaperDetailScreen(wallpaper: wallpaper, isPresented: $showDetailScreen)
             }
         }
         .overlay(
@@ -248,38 +247,128 @@ struct HomeScreen: View {
     
     @ViewBuilder
     private func bannerImageView(for card: CarouselCard) -> some View {
-        CachedAsyncImage(url: URL(string: card.imageUrl)) { phase in
-            bannerImageContent(phase: phase)
+        GeometryReader { geometry in
+            ZStack {
+                // Background image
+                CachedAsyncImage(url: URL(string: card.imageUrl)) { phase in
+                    switch phase {
+                    case .empty:
+                        Rectangle()
+                            .fill(theme.surfaceVariant)
+                            .overlay(
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+                            )
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                    case .failure:
+                        Rectangle()
+                            .fill(theme.surfaceVariant)
+                            .overlay(
+                                Image(systemName: "photo")
+                                    .font(.title)
+                                    .foregroundColor(theme.onSurfaceVariant)
+                            )
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+                
+                // Banner name centered vertically and horizontally
+                VStack {
+                    Spacer()
+                    
+                    HStack {
+                        Spacer()
+                        Text(card.name.isEmpty ? "Featured" : card.name)
+                            .font(.headline)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 12)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(.ultraThinMaterial)
+                            )
+                        Spacer()
+                    }
+                    
+                    Spacer()
+                }
+            }
         }
         .frame(width: UIScreen.main.bounds.width - 64, height: 200)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: 4)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
     }
     
     @ViewBuilder
-    private func bannerImageContent(phase: AsyncImagePhase) -> some View {
-        switch phase {
-        case .empty:
-            RoundedRectangle(cornerRadius: 16)
-                .fill(theme.surfaceVariant)
-                .overlay(
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
-                )
-        case .success(let image):
-            image
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        case .failure:
-            RoundedRectangle(cornerRadius: 16)
-                .fill(theme.surfaceVariant)
-                .overlay(
-                    Image(systemName: "photo")
-                        .font(.title)
-                        .foregroundColor(theme.onSurfaceVariant)
-                )
-        @unknown default:
-            EmptyView()
+    private func bannerImageContent(phase: AsyncImagePhase, card: CarouselCard) -> some View {
+        ZStack {
+            switch phase {
+            case .empty:
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(theme.surfaceVariant)
+                    .overlay(
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+                    )
+            case .success(let image):
+                image
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+            case .failure:
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(theme.surfaceVariant)
+                    .overlay(
+                        Image(systemName: "photo")
+                            .font(.title)
+                            .foregroundColor(theme.onSurfaceVariant)
+                    )
+            @unknown default:
+                EmptyView()
+            }
+            
+            // Banner name overlay (always on top regardless of phase)
+            VStack {
+                Spacer()
+                
+                HStack {
+                    Spacer()
+                    Text(card.name.isEmpty ? "Featured" : card.name)
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(.ultraThinMaterial)
+                        )
+                    Spacer()
+                }
+                .padding(.bottom, 24)
+            }
+            .allowsHitTesting(false)
+            
+            // Test overlay (top-left) 
+            VStack {
+                HStack {
+                    Text("TEST: \(card.name)")
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                        .padding(4)
+                        .background(Color.yellow.opacity(0.9))
+                    Spacer()
+                }
+                Spacer()
+            }
+            .allowsHitTesting(false)
         }
     }
     
@@ -576,15 +665,17 @@ struct HomeScreen: View {
     // MARK: - Banner Helper Functions
     
     private func handleBannerTap(card: CarouselCard) {
+        
         // Show loading immediately
         withAnimation(.easeInOut(duration: 0.2)) {
             isLoadingBannerDetail = true
         }
         
-        // Find wallpaper with same document ID as banner for navigation
-        // Check both Samsung collection and TrendingWallpapers collection first
-        if let wallpaper = firebaseManager.wallpapers.first(where: { $0.id == card.id }) {
-            // Found in cached data - show immediately
+        // Find wallpaper by matching document ID in Samsung collection
+        if let wallpaper = firebaseManager.wallpapers.first(where: { wallpaper in
+            let wallpaperDocumentId = String(wallpaper.id.prefix(36))
+            return wallpaperDocumentId == card.id || wallpaper.id == card.id
+        }) {
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     self.isLoadingBannerDetail = false
@@ -592,8 +683,12 @@ struct HomeScreen: View {
                 self.selectedBannerWallpaper = wallpaper
                 self.showDetailScreen = true
             }
-        } else if let trendingWallpaper = firebaseManager.trendingWallpapers.first(where: { $0.id == card.id }) {
-            // Found in trending cache - show immediately
+        } 
+        // Find wallpaper by matching document ID in TrendingWallpapers collection
+        else if let trendingWallpaper = firebaseManager.trendingWallpapers.first(where: { wallpaper in
+            let wallpaperDocumentId = String(wallpaper.id.prefix(36))
+            return wallpaperDocumentId == card.id || wallpaper.id == card.id
+        }) {
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     self.isLoadingBannerDetail = false
@@ -601,12 +696,79 @@ struct HomeScreen: View {
                 self.selectedBannerWallpaper = trendingWallpaper
                 self.showDetailScreen = true
             }
-        } else {
-            // Fetch wallpaper directly from Firebase using banner ID with optimized approach
-            fetchWallpaperFromBanner(card: card)
+        } 
+        // If not found in cached collections, fetch from Firebase using document ID
+        else {
+            fetchWallpaperByDocumentId(card: card)
         }
     }
     
+    private func fetchWallpaperByDocumentId(card: CarouselCard) {
+        
+        // Try Samsung collection first (direct document lookup by ID)
+        firebaseManager.db.collection("Samsung").document(card.id).getDocument { snapshot, error in
+            if error != nil {
+                self.searchTrendingWallpaperById(card: card)
+                return
+            }
+            
+            if let document = snapshot, document.exists, let data = document.data() {
+                let wallpaper = Wallpaper(id: card.id, data: data)
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        self.isLoadingBannerDetail = false
+                    }
+                    self.selectedBannerWallpaper = wallpaper
+                    self.showDetailScreen = true
+                }
+            } else {
+                self.searchTrendingWallpaperById(card: card)
+            }
+        }
+    }
+    
+    private func searchTrendingWallpaperById(card: CarouselCard) {
+        // Try TrendingWallpapers collection (direct document lookup by ID)
+        firebaseManager.db.collection("TrendingWallpapers").document(card.id).getDocument { snapshot, error in
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    self.isLoadingBannerDetail = false
+                }
+            }
+            
+            if error != nil {
+                return
+            }
+            
+            if let document = snapshot, document.exists, let data = document.data() {
+                let wallpaper = Wallpaper(id: card.id, data: data)
+                DispatchQueue.main.async {
+                    self.selectedBannerWallpaper = wallpaper
+                    self.showDetailScreen = true
+                }
+            } else {
+                // Create a fallback mock wallpaper for banners that don't have matching wallpaper documents
+                self.createFallbackWallpaper(card: card)
+            }
+        }
+    }
+    
+    private func createFallbackWallpaper(card: CarouselCard) {
+        let mockWallpaperData: [String: Any] = [
+            "wallpaperName": card.name,
+            "imageUrl": card.imageUrl,
+            "thumbnail": card.imageUrl,
+            "createdAt": Date(),
+            "category": "Featured",
+            "series": "Banner"
+        ]
+        let mockWallpaper = Wallpaper(id: card.id, data: mockWallpaperData)
+        
+        DispatchQueue.main.async {
+            self.selectedBannerWallpaper = mockWallpaper
+            self.showDetailScreen = true
+        }
+    }
     
     private func fetchWallpaperFromBanner(card: CarouselCard) {
         // Use cache-first approach for instant loading

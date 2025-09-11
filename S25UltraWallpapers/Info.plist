@@ -6,5 +6,16 @@
 	<string>This app needs access to your photo library to save beautiful wallpapers to your device.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app needs access to your photo library to save beautiful wallpapers to your device.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string></string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.352408897001-2tu6mi63ub2f4dmvnveg0tdmf4b3j1k4</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

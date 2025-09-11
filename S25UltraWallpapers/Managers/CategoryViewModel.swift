@@ -29,6 +29,7 @@ class CategoryViewModel: ObservableObject {
     
     init(category: Category) {
         self.category = category
+        print("🏠 [CATEGORY INIT] Category: \(category.name), Type: \(category.categoryType), Subcategories: \(category.subcategories)")
         loadInitialData()
     }
     
@@ -87,6 +88,7 @@ class CategoryViewModel: ObservableObject {
         
         let paginator = FirestorePaginator(baseQuery: query)
         
+        print("📎 [PAGINATOR] Created paginator for \(subcategory), loading initial wallpapers...")
         // Load initial data immediately
         paginator.loadInitialWallpapers()
         
@@ -94,22 +96,31 @@ class CategoryViewModel: ObservableObject {
     }
     
     private func loadInitialData() {
+        print("📊 [LOAD DATA] Loading initial data for category: \(category.name)")
         // Load subcategories based on category type
         if category.categoryType == "brand" && category.name == "Samsung" {
+            print("📊 [LOAD DATA] Loading Samsung series data")
             // For Samsung, get series from Samsung collection
             loadSamsungSeries()
         } else {
+            print("📊 [LOAD DATA] Setting up main category subcategories")
             // For main categories, use subcategories from category object
             setupMainCategorySubcategories()
         }
     }
     
     private func setupMainCategorySubcategories() {
+        print("📋 [SUBCATEGORIES] Setting up subcategories for \(category.name): \(category.subcategories)")
         // Filter out "None" subcategories
         let filteredSubcategories = category.subcategories.filter { $0.lowercased() != "none" }
         
+        print("📋 [SUBCATEGORIES] Filtered subcategories: \(filteredSubcategories)")
+        
         if !filteredSubcategories.isEmpty {
             availableSubcategories = filteredSubcategories
+            print("📋 [SUBCATEGORIES] Set available subcategories: \(availableSubcategories)")
+        } else {
+            print("⚠️ [SUBCATEGORIES] No valid subcategories found!")
         }
     }
     

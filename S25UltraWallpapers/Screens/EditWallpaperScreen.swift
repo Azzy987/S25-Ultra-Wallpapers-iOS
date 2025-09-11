@@ -185,15 +185,27 @@ struct EditWallpaperScreen: View {
     }
     
     private func saveToPhotos(_ image: UIImage) {
+        // Convert WebP or any format to JPEG for iOS compatibility
+        guard let jpegData = image.jpegData(compressionQuality: 0.9),
+              let jpegImage = UIImage(data: jpegData) else {
+            DispatchQueue.main.async {
+                showToast = true
+                toastMessage = "Failed to convert image format"
+            }
+            return
+        }
+        
+        print("📱 [DOWNLOAD] Successfully converted edited wallpaper to JPEG format")
+        
         PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.creationRequestForAsset(from: image)
+            PHAssetChangeRequest.creationRequestForAsset(from: jpegImage)
         } completionHandler: { success, error in
             DispatchQueue.main.async {
                 if success {
                     showDownloadSuccess = true
                 } else {
                     showToast = true
-                    toastMessage = "Failed to save wallpaper"
+                    toastMessage = "Failed to save wallpaper: \(error?.localizedDescription ?? "Unknown error")"
                 }
             }
         }

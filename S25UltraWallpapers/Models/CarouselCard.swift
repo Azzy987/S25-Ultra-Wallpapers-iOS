@@ -3,6 +3,7 @@ import Foundation
 struct CarouselCard: Identifiable, Equatable {
     let id: String
     let imageUrl: String
+    let name: String
     var previousOffset: CGFloat = 0
     
     static func == (lhs: CarouselCard, rhs: CarouselCard) -> Bool {
@@ -12,5 +13,6 @@ struct CarouselCard: Identifiable, Equatable {
     init(from banner: Banner) {
         self.id = banner.id
         self.imageUrl = banner.imageUrl
+        self.name = banner.name
     }
 } 

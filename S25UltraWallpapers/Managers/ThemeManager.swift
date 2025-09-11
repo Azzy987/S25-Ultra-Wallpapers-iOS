@@ -10,7 +10,6 @@ class ThemeManager: ObservableObject {
     
     @AppStorage("themeMode") var themeMode: ThemeMode = .dark {
         didSet {
-            print("🎨 ThemeMode changed to: \(themeMode.rawValue)")
             updateTheme()
         }
     }
@@ -20,49 +19,36 @@ class ThemeManager: ObservableObject {
     
     private init() {
         self.theme = Self.getInitialTheme()
-        print("🎨 Initial theme type: \(self.theme.themeType)")
         setupThemeObserver()
     }
     
     private func setupThemeObserver() {
-        print("🎨 Setting up theme observers")
         // No system theme observers needed since we only support manual light/dark selection
     }
     
     deinit {
-        print("🎨 ThemeManager deinit")
         observer?.invalidate()
         NotificationCenter.default.removeObserver(self)
     }
     
     func updateTheme() {
-        print("🎨 Updating theme")
-        print("🎨 Theme mode: \(themeMode.rawValue)")
-        
         withAnimation(.easeInOut(duration: 0.3)) {
             switch themeMode {
             case .dark:
-                print("🎨 Setting dark theme")
                 theme = AppColors.dark
             case .light:
-                print("🎨 Setting light theme")
                 theme = AppColors.light
             }
         }
-        
-        print("🎨 Theme updated to: \(theme.themeType)")
     }
     
     private static func getInitialTheme() -> AppColorScheme {
         let themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "dark") ?? .dark
-        print("🎨 Getting initial theme for mode: \(themeMode.rawValue)")
         
         switch themeMode {
         case .dark:
-            print("🎨 Initial dark theme")
             return AppColors.dark
         case .light:
-            print("🎨 Initial light theme")
             return AppColors.light
         }
     }

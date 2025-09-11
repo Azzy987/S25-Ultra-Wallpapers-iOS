@@ -48,6 +48,5 @@ struct CategoryCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 24))
         }
         .clipShape(RoundedRectangle(cornerRadius: 24))
-        .shadow(radius: 5)
     }
 }

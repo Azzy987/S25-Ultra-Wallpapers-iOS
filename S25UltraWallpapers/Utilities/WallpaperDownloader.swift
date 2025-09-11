@@ -53,13 +53,29 @@ class WallpaperDownloader: ObservableObject {
                     return
                 }
                 
-                guard let data = data, let image = UIImage(data: data) else {
-                    self?.showToastMessage("Failed to process image")
+                guard let data = data else {
+                    self?.showToastMessage("Failed to download image data")
                     self?.isDownloading = false
                     return
                 }
                 
-                self?.saveImageToPhotos(image)
+                // Convert WebP or any format to JPEG for iOS compatibility
+                guard let image = UIImage(data: data) else {
+                    self?.showToastMessage("Unsupported image format")
+                    self?.isDownloading = false
+                    return
+                }
+                
+                // Convert to JPEG format for reliable saving
+                guard let jpegData = image.jpegData(compressionQuality: 0.9),
+                      let jpegImage = UIImage(data: jpegData) else {
+                    self?.showToastMessage("Failed to convert image format")
+                    self?.isDownloading = false
+                    return
+                }
+                
+                print("📱 [DOWNLOAD] Successfully converted image to JPEG format")
+                self?.saveImageToPhotos(jpegImage)
             }
         }.resume()
     }

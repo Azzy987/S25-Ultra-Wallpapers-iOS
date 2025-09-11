@@ -17,7 +17,7 @@ struct DisplaySettingsSection: View {
                 // Theme Selection with Segmented Control
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
-                        Image(systemName: "moon.circle.fill")
+                        Image(systemName: themeManager.themeMode == .dark ? "moon.circle.fill" : "sun.max.circle.fill")
                             .foregroundColor(.indigo)
                             .font(.system(size: 20))
                             .frame(width: 24)

@@ -1,5 +1,7 @@
 import SwiftUI
 import FirebaseAuth
+import GoogleSignIn
+import Firebase
 
 @MainActor
 class UserManager: ObservableObject {
@@ -83,15 +85,7 @@ class UserManager: ObservableObject {
     func signInWithGoogle() {
         print("📱 Initiating Google Sign-In...")
         
-        // TODO: Add GoogleSignIn SDK dependency to project first
-        // For now, show instructions to user
-        
-        /*
-        // With GoogleSignIn SDK, the implementation would be:
-        
-        import GoogleSignIn
-        
-        guard let presentingViewController = UIApplication.shared.windows.first?.rootViewController else {
+        guard let presentingViewController = getRootViewController() else {
             print("❌ No presenting view controller found")
             return
         }
@@ -133,29 +127,24 @@ class UserManager: ObservableObject {
                 }
             }
         }
-        */
-        
-        // Temporary implementation - simulate sign in for demo
-        simulateGoogleSignIn()
     }
     
-    // Temporary method for demo purposes
-    private func simulateGoogleSignIn() {
-        // Simulate a successful Google sign-in for demo
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            // Create a simulated user state
-            self?.isSignedIn = true
-            self?.displayName = "Demo User"
-            self?.email = "demo@example.com"
-            self?.profileImageURL = nil
-            
-            print("✅ Demo Google Sign-In completed")
+    private func getRootViewController() -> UIViewController? {
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first else {
+            return nil
         }
+        return window.rootViewController
     }
     
     func signOut() {
         do {
+            // Sign out from Firebase
             try Auth.auth().signOut()
+            
+            // Sign out from Google
+            GIDSignIn.sharedInstance.signOut()
+            
             print("📱 User signed out successfully")
         } catch {
             print("📱 Error signing out: \(error.localizedDescription)")

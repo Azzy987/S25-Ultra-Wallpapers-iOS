@@ -20,6 +20,7 @@ struct MainTabView: View {
     @State private var selectedTab = 0
     @State private var showSettings = false
     @StateObject private var tabManager = TabManager.shared
+    @StateObject private var userManager = UserManager.shared
     @State private var dragOffset: CGFloat = 0
     
     // Calculate the display index for circular navigation
@@ -36,13 +37,30 @@ struct MainTabView: View {
                 // Top App Bar - Fixed layout with consistent centering
                 VStack(spacing: 0) {
                     HStack {
-                        // Profile button (left)
+                        // Profile button (left) - shows user photo when signed in
                         Button {
                             showSettings = true
                         } label: {
-                            Image(systemName: "person.circle")
-                                .font(.title2)
-                                .foregroundColor(theme.onSurface)
+                            if userManager.isSignedIn, let profileImageURL = userManager.profileImageURL, 
+                               let url = URL(string: profileImageURL) {
+                                // Show actual user profile picture
+                                AsyncImage(url: url) { image in
+                                    image
+                                        .resizable()
+                                        .aspectRatio(contentMode: .fill)
+                                        .frame(width: 32, height: 32)
+                                        .clipShape(Circle())
+                                } placeholder: {
+                                    Image(systemName: "person.circle.fill")
+                                        .font(.title2)
+                                        .foregroundColor(theme.onSurface)
+                                }
+                            } else {
+                                // Show default icon when not signed in or no profile picture
+                                Image(systemName: userManager.isSignedIn ? "person.circle.fill" : "person.circle")
+                                    .font(.title2)
+                                    .foregroundColor(theme.onSurface)
+                            }
                         }
                         .frame(width: 44, height: 44) // Fixed frame for consistent layout
                         

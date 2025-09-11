@@ -7,7 +7,6 @@ enum SwipeDirection {
 
 struct WallpaperDetailScreen: View {
     let wallpaper: Wallpaper
-    let animation: Namespace.ID
     @Binding var isPresented: Bool
     
     // Optional wallpaper list for swipe navigation
@@ -47,29 +46,17 @@ struct WallpaperDetailScreen: View {
     @State private var previousWallpaperImage: UIImage?
     @State private var isLoadingNextPreview = false
     @State private var isLoadingPreviousPreview = false
+    @State private var showControls = true // Controls visibility state
     
     // Initializer
-    init(wallpaper: Wallpaper, animation: Namespace.ID, isPresented: Binding<Bool>, wallpapers: [Wallpaper]? = nil, currentIndex: Int? = nil) {
+    init(wallpaper: Wallpaper, isPresented: Binding<Bool>, wallpapers: [Wallpaper]? = nil, currentIndex: Int? = nil) {
         self.wallpaper = wallpaper
-        self.animation = animation
         self._isPresented = isPresented
         self.wallpapers = wallpapers
         self.currentIndex = currentIndex
         self._currentWallpaper = State(initialValue: wallpaper)
         self._currentWallpaperIndex = State(initialValue: currentIndex ?? 0)
         
-        print("\n🏁 === WallpaperDetailScreen INIT ===")
-        print("🏁 Initial wallpaper: \(wallpaper.wallpaperName)")
-        print("🏁 Initial index: \(currentIndex ?? 0)")
-        print("🏁 Total wallpapers: \(wallpapers?.count ?? 0)")
-        if let wallpapers = wallpapers {
-            print("🏁 Wallpaper list:")
-            for (index, wp) in wallpapers.enumerated() {
-                let marker = index == (currentIndex ?? 0) ? " ← CURRENT" : ""
-                print("🏁   [\(index)]: \(wp.wallpaperName)\(marker)")
-            }
-        }
-        print("🏁 === INIT END ===\n")
     }
     
     var body: some View {
@@ -91,22 +78,30 @@ struct WallpaperDetailScreen: View {
                     
                     // Current wallpaper
                     ZStack {
-                        // Thumbnail layer
+                        // Thumbnail layer with hero animation
                         CachedAsyncImage(url: URL(string: currentWallpaper.thumbnail)) { phase in
                             switch phase {
                             case .empty:
-                                ProgressView()
+                                Rectangle()
+                                    .fill(Color.black)
+                                    .overlay(
+                                        ProgressView()
+                                            .progressViewStyle(CircularProgressViewStyle(tint: Color.white))
+                                    )
                             case .success(let image):
                                 image
                                     .resizable()
                                     .aspectRatio(contentMode: .fill)
-                                    .matchedGeometryEffect(
-                                        id: "wallpaper-\(currentWallpaper.id)",
-                                        in: animation,
-                                        isSource: false
-                                    )
+                                    .opacity(isMainImageLoaded ? 0 : 1)
+                                    .animation(.easeOut(duration: 0.4), value: isMainImageLoaded)
                             case .failure:
-                                Image(systemName: "photo")
+                                Rectangle()
+                                    .fill(Color.black)
+                                    .overlay(
+                                        Image(systemName: "photo")
+                                            .font(.largeTitle)
+                                            .foregroundColor(.white)
+                                    )
                             @unknown default:
                                 EmptyView()
                             }
@@ -118,7 +113,7 @@ struct WallpaperDetailScreen: View {
                                 .resizable()
                                 .aspectRatio(contentMode: .fill)
                                 .opacity(isMainImageLoaded ? 1 : 0)
-                                .animation(.easeIn(duration: 0.3), value: isMainImageLoaded)
+                                .animation(.easeIn(duration: 0.4), value: isMainImageLoaded)
                         }
                     }
                     .frame(width: geometry.size.width, height: geometry.size.height)
@@ -150,11 +145,12 @@ struct WallpaperDetailScreen: View {
                 
                 // Overlay content
                 VStack {
-                    // Back button at top
-                    VStack {
+                    // Back button at top - hide/show with animation
+                    if showControls {
+                        VStack {
                         HStack {
                             Button {
-                                withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
+                                withAnimation(.easeInOut(duration: 0.6)) {
                                     isPresented = false
                                 }
                             } label: {
@@ -182,10 +178,12 @@ struct WallpaperDetailScreen: View {
                         .padding(.horizontal, 24)
                         .padding(.top, safeAreaTop + 16)
                         Spacer()
+                        }
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     
-                    // Collapsible Bottom container - only show when main image is loaded
-                    if isMainImageLoaded {
+                    // Collapsible Bottom container - show when main image is loaded and controls are visible
+                    if isMainImageLoaded && showControls {
                         // Swipe instruction text when collapsed and wallpapers available
                         if !isInfoExpanded && wallpapers?.count ?? 0 > 1 {
                             Text("Swipe up or down to change wallpapers")
@@ -200,9 +198,11 @@ struct WallpaperDetailScreen: View {
                             wallpaper: currentWallpaper,
                             calculatedMetadata: calculatedMetadata,
                             isExpanded: $isInfoExpanded,
+                            showControls: $showControls,
                             isDownloading: isDownloading,
                             isSharing: isSharing,
                             isPreparing: isPreparing,
+                            isFavorited: favoritesManager.isFavorite(currentWallpaper.id),
                             downloadAction: downloadWallpaper,
                             favoriteAction: toggleFavorite,
                             shareAction: shareWallpaper,
@@ -216,7 +216,18 @@ struct WallpaperDetailScreen: View {
                 }
             }
             .ignoresSafeArea()
-            .simultaneousGesture(
+            .onTapGesture {
+                if isInfoExpanded {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isInfoExpanded = false
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        showControls.toggle()
+                    }
+                }
+            }
+            .gesture(
                 DragGesture()
                     .onChanged { value in
                         let verticalMovement = value.translation.height
@@ -224,14 +235,14 @@ struct WallpaperDetailScreen: View {
                         
                         // Only process vertical swipes (not horizontal)
                         if abs(verticalMovement) > abs(horizontalMovement) && wallpapers?.count ?? 0 > 1 {
-                            // Limit drag offset to screen height for smooth tracking
-                            let maxOffset = geometry.size.height
-                            let newDragOffset = max(-maxOffset, min(maxOffset, verticalMovement))
+                            // YouTube Shorts style: Allow dragging up to 80% of screen height for smooth interaction
+                            let maxOffset = geometry.size.height * 0.8
+                            let dampingFactor: CGFloat = 0.7 // Increased responsiveness
+                            let dampedMovement = verticalMovement * dampingFactor
+                            let newDragOffset = max(-maxOffset, min(maxOffset, dampedMovement))
                             
-                            // Only update dragOffset if it's significantly different to prevent jitter
-                            if abs(newDragOffset - dragOffset) > 5 {
-                                dragOffset = newDragOffset
-                            }
+                            // Update dragOffset with smoother response
+                            dragOffset = newDragOffset
                             
                             // Load preview images immediately when starting to drag (prevent multiple calls)
                             if dragOffset > 20 && previousWallpaperImage == nil && !isLoadingPreviousPreview {
@@ -251,46 +262,35 @@ struct WallpaperDetailScreen: View {
                         // Only process vertical gestures (not horizontal)
                         if abs(verticalMovement) > 30 && abs(verticalMovement) > horizontalMovement * 1.5 && wallpapers?.count ?? 0 > 1 {
                             
-                            print("\n📱 === GESTURE END ===")
-                            print("📱 verticalMovement: \(verticalMovement)")
-                            print("📱 velocity: \(velocity)")
-                            print("📱 dragOffset: \(dragOffset)")
-                            print("📱 currentIndex: \(currentWallpaperIndex)")
-                            
                             // Detect if it's a fast swipe or slow drag based on velocity
                             let isSwipe = abs(velocity) > 500  // 500 points per second threshold
                             
-                            let swipeThreshold = geometry.size.height * 0.15   // 15% for fast swipe
-                            let dragThreshold = geometry.size.height * 0.4     // 40% for slow drag
+                            // Improved thresholds for better user experience
+                            let swipeThreshold = geometry.size.height * 0.12   // 12% for fast swipe (more sensitive)
+                            let dragThreshold = geometry.size.height * 0.25    // 25% for slow drag (easier to trigger)
                             
                             let thresholdToUse = isSwipe ? swipeThreshold : dragThreshold
                             
-                            print("📱 isSwipe: \(isSwipe), threshold: \(thresholdToUse)")
                             
                             if abs(dragOffset) > thresholdToUse {
-                                print("📱 ✅ THRESHOLD MET - Triggering navigation")
+                                
+                                // Add haptic feedback for successful swipe
+                                let impactFeedback = UIImpactFeedbackGenerator(style: .light)
+                                impactFeedback.impactOccurred()
                                 
                                 // Immediately change wallpaper to prevent half-states
                                 handleSwipeNavigation(direction: verticalMovement > 0 ? .down : .up)
                                 
                             } else {
-                                print("📱 ❌ THRESHOLD NOT MET - Snapping back")
-                                // Snap back to current wallpaper with elastic animation
-                                withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
+                                // Snap back to current wallpaper with improved elastic animation
+                                withAnimation(.interpolatingSpring(stiffness: 400, damping: 35)) {
                                     dragOffset = 0
                                 }
                             }
-                            print("📱 === GESTURE END ===\n")
                         } else {
-                            // Handle tap to collapse info or snap back
-                            if abs(verticalMovement) < 10 && horizontalMovement < 10 {
-                                if isInfoExpanded {
-                                    withAnimation(.easeOut(duration: 0.3)) {
-                                        isInfoExpanded = false
-                                    }
-                                }
-                            } else {
-                                // Snap back if gesture wasn't recognized
+                            // Only handle non-tap drag gestures - taps are handled by onTapGesture
+                            if abs(verticalMovement) >= 10 || horizontalMovement >= 10 {
+                                // Snap back if gesture wasn't recognized as a valid swipe
                                 withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
                                     dragOffset = 0
                                 }
@@ -358,16 +358,12 @@ struct WallpaperDetailScreen: View {
     
     private func loadMainImage() {
         guard let url = URL(string: currentWallpaper.imageUrl) else { 
-            print("🖼️ loadMainImage: Invalid URL for \(currentWallpaper.wallpaperName)")
             return 
         }
-        
-        print("🖼️ Loading main image for: \(currentWallpaper.wallpaperName)")
         isMainImageLoading = true
         URLSession.shared.dataTask(with: url) { data, response, error in
             if let data = data, let image = UIImage(data: data) {
                 DispatchQueue.main.async {
-                    print("🖼️ ✅ Main image loaded for: \(self.currentWallpaper.wallpaperName)")
                     withAnimation(.easeIn(duration: 0.3)) {
                         self.mainImage = image
                         self.isMainImageLoaded = true
@@ -375,7 +371,6 @@ struct WallpaperDetailScreen: View {
                     }
                 }
             } else {
-                print("🖼️ ❌ Failed to load main image for: \(self.currentWallpaper.wallpaperName)")
                 DispatchQueue.main.async {
                     self.isMainImageLoading = false
                 }
@@ -392,40 +387,29 @@ struct WallpaperDetailScreen: View {
     
     private func setupAdjacentWallpapers() {
         guard let wallpapers = wallpapers, wallpapers.count > 1 else { 
-            print("🔄 setupAdjacentWallpapers: No wallpapers or count <= 1")
             return 
         }
-        
-        print("🔄 setupAdjacentWallpapers: currentIndex=\(currentWallpaperIndex), total=\(wallpapers.count)")
-        print("🔄 Current wallpaper: \(currentWallpaper.wallpaperName)")
         
         // Set next wallpaper
         let nextIndex = (currentWallpaperIndex + 1) % wallpapers.count
         nextWallpaper = wallpapers[nextIndex]
-        print("🔄 Next wallpaper[\(nextIndex)]: \(nextWallpaper?.wallpaperName ?? "nil")")
         
         // Set previous wallpaper
         let previousIndex = currentWallpaperIndex == 0 ? wallpapers.count - 1 : currentWallpaperIndex - 1
         previousWallpaper = wallpapers[previousIndex]
-        print("🔄 Previous wallpaper[\(previousIndex)]: \(previousWallpaper?.wallpaperName ?? "nil")")
     }
     
     private func loadPreviewImage(for wallpaper: Wallpaper?, isNext: Bool) {
         guard let wallpaper = wallpaper else { 
-            print("📸 loadPreviewImage: wallpaper is nil for \(isNext ? "next" : "previous")")
             return 
         }
         guard let url = URL(string: wallpaper.imageUrl) else { 
-            print("📸 loadPreviewImage: invalid URL for \(wallpaper.wallpaperName)")
             return 
         }
-        
-        print("📸 Loading \(isNext ? "next" : "previous") preview: \(wallpaper.wallpaperName)")
         
         URLSession.shared.dataTask(with: url) { data, response, error in
             if let data = data, let image = UIImage(data: data) {
                 DispatchQueue.main.async {
-                    print("📸 ✅ Loaded \(isNext ? "next" : "previous") preview: \(wallpaper.wallpaperName)")
                     if isNext {
                         self.nextWallpaperImage = image
                     } else {
@@ -433,7 +417,6 @@ struct WallpaperDetailScreen: View {
                     }
                 }
             } else {
-                print("📸 ❌ Failed to load \(isNext ? "next" : "previous") preview: \(wallpaper.wallpaperName)")
             }
         }.resume()
     }
@@ -612,7 +595,7 @@ struct WallpaperDetailScreen: View {
         isDownloading = true
         
         loadCachedImage(from: currentWallpaper.imageUrl) { image in
-            guard let image = image else {
+            guard let originalImage = image else {
                 DispatchQueue.main.async {
                     self.toastMessage = "Failed to download wallpaper"
                     self.showToast = true
@@ -621,15 +604,28 @@ struct WallpaperDetailScreen: View {
                 return
             }
             
+            // Convert WebP or any format to JPEG for iOS compatibility
+            guard let jpegData = originalImage.jpegData(compressionQuality: 0.9),
+                  let jpegImage = UIImage(data: jpegData) else {
+                DispatchQueue.main.async {
+                    self.toastMessage = "Failed to convert image format"
+                    self.showToast = true
+                    self.isDownloading = false
+                }
+                return
+            }
+            
+            print("📱 [DOWNLOAD] Successfully converted wallpaper to JPEG format")
+            
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAsset(from: image)
+                PHAssetChangeRequest.creationRequestForAsset(from: jpegImage)
             } completionHandler: { success, error in
                 DispatchQueue.main.async {
                     self.isDownloading = false
                     if success {
                         self.showDownloadSuccess = true
                     } else {
-                        self.toastMessage = "Failed to save wallpaper"
+                        self.toastMessage = "Failed to save wallpaper: \(error?.localizedDescription ?? "Unknown error")"
                         self.showToast = true
                     }
                 }
@@ -773,16 +769,8 @@ struct WallpaperDetailScreen: View {
     // MARK: - Swipe Navigation
     private func handleSwipeNavigation(direction: SwipeDirection) {
         guard let wallpapers = wallpapers, wallpapers.count > 1 else { 
-            print("🚫 handleSwipeNavigation: No wallpapers or count <= 1")
             return 
         }
-        
-        print("\n🎯 === SWIPE NAVIGATION START ===")
-        print("🎯 Direction: \(direction)")
-        print("🎯 Current index BEFORE: \(currentWallpaperIndex)")
-        print("🎯 Current wallpaper BEFORE: \(currentWallpaper.wallpaperName)")
-        print("🎯 Total wallpapers: \(wallpapers.count)")
-        print("🎯 DragOffset: \(dragOffset)")
         
         let newIndex: Int
         let newWallpaper: Wallpaper
@@ -790,35 +778,22 @@ struct WallpaperDetailScreen: View {
         
         switch direction {
         case .up:
-            // Next wallpaper
             newIndex = (currentWallpaperIndex + 1) % wallpapers.count
-            newWallpaper = wallpapers[newIndex] // Use wallpapers array directly
+            newWallpaper = wallpapers[newIndex]
             preloadedImage = nextWallpaperImage
-            print("🎯 SWIPE UP: newIndex=\(newIndex), newWallpaper=\(newWallpaper.wallpaperName)")
         case .down:
-            // Previous wallpaper  
             newIndex = currentWallpaperIndex == 0 ? wallpapers.count - 1 : currentWallpaperIndex - 1
-            newWallpaper = wallpapers[newIndex] // Use wallpapers array directly
+            newWallpaper = wallpapers[newIndex]
             preloadedImage = previousWallpaperImage
-            print("🎯 SWIPE DOWN: newIndex=\(newIndex), newWallpaper=\(newWallpaper.wallpaperName)")
         }
         
-        // Validate the new index
         guard newIndex >= 0 && newIndex < wallpapers.count else {
-            print("🚫 Invalid newIndex: \(newIndex), wallpapers.count: \(wallpapers.count)")
             return
         }
         
-        // Ensure dragOffset is 0 to prevent half-states
-        print("🎯 Setting dragOffset to 0")
         dragOffset = 0
-        
-        // Change wallpaper immediately
         currentWallpaper = newWallpaper
         currentWallpaperIndex = newIndex
-        
-        print("🎯 Current index AFTER: \(currentWallpaperIndex)")
-        print("🎯 Current wallpaper AFTER: \(currentWallpaper.wallpaperName)")
         
         // Reset loading states
         isLoadingNextPreview = false
@@ -826,13 +801,10 @@ struct WallpaperDetailScreen: View {
         
         // Use preloaded image if available
         if let preloadedImage = preloadedImage {
-            print("🎯 Using preloaded image")
             mainImage = preloadedImage
             isMainImageLoaded = true
             isMainImageLoading = false
         } else {
-            print("🎯 Loading new main image")
-            // Reset image states for new wallpaper
             mainImage = nil
             isMainImageLoading = true
             isMainImageLoaded = false
@@ -843,18 +815,15 @@ struct WallpaperDetailScreen: View {
         calculatedMetadata = nil
         startImageMetadataCalculation()
         
-        // Clear old preview images BEFORE setting up new ones
+        // Clear old preview images
         nextWallpaperImage = nil
         previousWallpaperImage = nil
         
-        // Setup new adjacent wallpapers
         setupAdjacentWallpapers()
         
         // Haptic feedback
         let impactFeedback = UIImpactFeedbackGenerator(style: .light)
         impactFeedback.impactOccurred()
-        
-        print("🎯 === SWIPE NAVIGATION END ===\n")
     }
 }
 
@@ -942,9 +911,11 @@ struct CollapsibleInfoContainer: View {
     let wallpaper: Wallpaper
     let calculatedMetadata: ImageMetadata?
     @Binding var isExpanded: Bool
+    @Binding var showControls: Bool
     let isDownloading: Bool
     let isSharing: Bool
     let isPreparing: Bool
+    let isFavorited: Bool
     let downloadAction: () -> Void
     let favoriteAction: () -> Void
     let shareAction: () -> Void
@@ -995,11 +966,18 @@ struct CollapsibleInfoContainer: View {
             .padding(.vertical, 12)
             .contentShape(Rectangle())
             .onTapGesture {
-                // Tap anywhere on header row - expand when collapsed, collapse when expanded
+                // Tap anywhere on header row - handle controls visibility and expansion
+                print("📦 [CONTAINER TAP] Container header tapped - showControls: \(showControls), isExpanded: \(isExpanded)")
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                    if isExpanded {
+                    if !showControls {
+                        // If controls are hidden, show them first
+                        print("🎛️ [CONTAINER TAP] Showing controls first")
+                        showControls = true
+                    } else if isExpanded {
+                        print("📦 [CONTAINER TAP] Collapsing expanded container")
                         isExpanded = false  // Collapse when expanded
                     } else {
+                        print("📦 [CONTAINER TAP] Expanding container")
                         isExpanded = true   // Expand when collapsed
                     }
                 }
@@ -1091,8 +1069,8 @@ struct CollapsibleInfoContainer: View {
                         )
                         
                         CircleActionButton(
-                            icon: favoritesManager.isFavorite(wallpaper.id) ? "heart.fill" : "heart",
-                            isActive: favoritesManager.isFavorite(wallpaper.id),
+                            icon: isFavorited ? "heart.fill" : "heart",
+                            isActive: isFavorited,
                             action: favoriteAction
                         )
                         

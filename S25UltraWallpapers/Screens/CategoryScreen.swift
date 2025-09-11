@@ -12,7 +12,6 @@ struct CategoryScreen: View {
     @State private var toastType: ToastView.ToastType = .info
     @StateObject private var scrollViewHelper = ScrollViewHelper()
     @State private var showDetail = false
-    @Namespace private var animation
     @State private var dragOffset: CGFloat = 0
     @State private var showSeriesFilter = false
     @StateObject private var viewModel: CategoryViewModel
@@ -115,7 +114,6 @@ struct CategoryScreen: View {
             if let wallpaper = selectedWallpaper {
                 WallpaperDetailScreen(
                     wallpaper: wallpaper,
-                    animation: animation,
                     isPresented: $showDetail
                 )
             }

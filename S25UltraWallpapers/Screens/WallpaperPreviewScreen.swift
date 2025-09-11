@@ -31,19 +31,20 @@ struct WallpaperPreviewScreen: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-            // True full-screen wallpaper background - extends to all edges
-            if let wallpaperImage = wallpaperImage {
-                Image(uiImage: wallpaperImage)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea(.all) // Extends to status bar and home indicator
-                    .clipped()
-            } else {
-                Color.black
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea(.all)
-            }
+                // Black background like detail screen
+                Color.black.ignoresSafeArea()
+                
+                // Wallpaper background - matching detail screen fit exactly
+                if let wallpaperImage = wallpaperImage {
+                    Image(uiImage: wallpaperImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                } else {
+                    Color.black
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
             
             // Loading indicator
             if isLoading {
@@ -73,9 +74,9 @@ struct WallpaperPreviewScreen: View {
                 }
             }
             
-            // Always visible controls overlay
+            // Always visible controls overlay - fixed position
             VStack {
-                // Top controls with proper safe area spacing
+                // Top controls with fixed positioning
                 HStack {
                     // Close button
                     Button {
@@ -93,7 +94,7 @@ struct WallpaperPreviewScreen: View {
                     
                     Spacer()
                     
-                    // Lock/Home toggle with spacing from status bar
+                    // Lock/Home toggle
                     HStack(spacing: 4) {
                         ForEach(PreviewMode.allCases, id: \.self) { mode in
                             Button {
@@ -118,7 +119,6 @@ struct WallpaperPreviewScreen: View {
                     .padding(4)
                     .background(.ultraThinMaterial)
                     .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .padding(.top, 16)
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, geometry.safeAreaInsets.top + 24)
@@ -145,28 +145,23 @@ struct WallpaperPreviewScreen: View {
     
     @ViewBuilder
     private var fullScreenLockOverlay: some View {
-        VStack {
-            Spacer()
-            
-            // Lock screen time display with live time
-            VStack(spacing: 8) {
-                Text(currentTime, format: .dateTime.weekday(.wide).month(.wide).day())
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+        GeometryReader { geometry in
+            ZStack {
+                // Lock screen time display - fixed position
+                VStack(spacing: 8) {
+                    Text(currentTime, format: .dateTime.weekday(.wide).month(.wide).day())
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 2, x: 0, y: 1)
+                    
+                    Text(currentTime, style: .time)
+                        .font(.system(size: 84, weight: .thin))
+                        .foregroundColor(.white)
+                        .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
+                }
+                .position(x: geometry.size.width / 2, y: geometry.size.height * 0.25)
                 
-                Text(currentTime, style: .time)
-                    .font(.system(size: 84, weight: .thin))
-                    .foregroundColor(.white)
-                    .shadow(color: .black.opacity(0.5), radius: 3, x: 0, y: 2)
-            }
-            .padding(.top, 100)
-            
-            Spacer()
-            
-            // Lock screen bottom controls
-            VStack(spacing: 20) {
-                // Sample notification
+                // Sample notification - fixed position
                 HStack {
                     Image(systemName: "message.fill")
                         .foregroundColor(.blue)
@@ -188,8 +183,9 @@ struct WallpaperPreviewScreen: View {
                 .background(.ultraThinMaterial)
                 .cornerRadius(16)
                 .padding(.horizontal, 30)
+                .position(x: geometry.size.width / 2, y: geometry.size.height * 0.75)
                 
-                // Bottom action buttons with proper spacing from bottom
+                // Bottom action buttons - fixed position
                 HStack {
                     Image(systemName: "flashlight.off.fill")
                         .font(.title2)
@@ -208,34 +204,33 @@ struct WallpaperPreviewScreen: View {
                         .clipShape(Circle())
                 }
                 .padding(.horizontal, 50)
-                .padding(.bottom, 120)
+                .position(x: geometry.size.width / 2, y: geometry.size.height - 80)
             }
         }
     }
     
     @ViewBuilder
     private var fullScreenHomeOverlay: some View {
-        VStack {
-            Spacer()
-            
-            // App icons grid
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 25) {
-                ForEach(0..<16) { index in
-                    fullScreenAppIcon(for: index)
+        GeometryReader { geometry in
+            ZStack {
+                // App icons grid - fixed position
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 25) {
+                    ForEach(0..<16) { index in
+                        fullScreenAppIcon(for: index)
+                    }
                 }
-            }
-            .padding(.horizontal, 40)
-            
-            Spacer()
-            
-            // Dock with proper spacing from bottom
-            HStack(spacing: 25) {
-                ForEach(0..<4) { index in
-                    fullScreenDockIcon(for: index)
+                .padding(.horizontal, 40)
+                .position(x: geometry.size.width / 2, y: geometry.size.height * 0.5)
+                
+                // Dock - fixed position
+                HStack(spacing: 25) {
+                    ForEach(0..<4) { index in
+                        fullScreenDockIcon(for: index)
+                    }
                 }
+                .padding(.horizontal, 40)
+                .position(x: geometry.size.width / 2, y: geometry.size.height - 80)
             }
-            .padding(.horizontal, 40)
-            .padding(.bottom, 120)
         }
     }
     

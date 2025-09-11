@@ -88,14 +88,11 @@ class FirestorePaginator: ObservableObject {
                     }
                     
                     guard let documents = snapshot?.documents else {
-                        print("FirestorePaginator DEBUG: No documents returned from query")
                         self.errorMessage = "No wallpapers found."
                         return
                     }
                     
-                    print("FirestorePaginator DEBUG: Successfully loaded \(documents.count) documents")
                     self.wallpapers = documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
-                    print("FirestorePaginator DEBUG: Converted to \(self.wallpapers.count) wallpapers")
                     self.lastDocument = documents.last
                     self.hasMoreData = documents.count == self.pageSize
                     

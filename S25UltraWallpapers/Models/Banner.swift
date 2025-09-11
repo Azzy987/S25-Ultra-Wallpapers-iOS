@@ -9,5 +9,6 @@ struct Banner: Identifiable {
         self.id = id
         self.name = data["bannerName"] as? String ?? ""
         self.imageUrl = data["bannerUrl"] as? String ?? ""
+        
     }
 } 

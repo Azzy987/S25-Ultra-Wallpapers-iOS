@@ -20,14 +20,12 @@ class FirebaseManager: ObservableObject {
         settings.cacheSettings = MemoryCacheSettings(garbageCollectorSettings: MemoryLRUGCSettings())
         settings.isSSLEnabled = true
         Firestore.firestore().settings = settings
-        print("🔧 Firebase configured with optimized memory cache")
 
         // Enable network first for faster loading
         Firestore.firestore().enableNetwork { error in
             if let error = error {
                 print("❌ Firebase network error: \(error)")
             } else {
-                print("✅ Firebase network enabled")
             }
         }
     }
@@ -53,6 +51,11 @@ class FirebaseManager: ObservableObject {
         }
         
         group.enter()
+        fetchTrendingWallpapers {
+            group.leave()
+        }
+        
+        group.enter()
         fetchTags {
             group.leave()
         }
@@ -68,7 +71,6 @@ class FirebaseManager: ObservableObject {
     }
     
     private func fetchWallpapers(completion: @escaping () -> Void = {}) {
-        print("🔍 Fetching Samsung wallpapers from Firebase...")
         db.collection("Samsung")
             .order(by: "timestamp", descending: true)
             .getDocuments { snapshot, error in
@@ -77,18 +79,10 @@ class FirebaseManager: ObservableObject {
                     return
                 }
                 
-                print("📊 Samsung wallpapers query completed - Document count: \(snapshot?.documents.count ?? 0)")
-                
                 DispatchQueue.main.async {
                     self.wallpapers = snapshot?.documents.map { doc in
                         Wallpaper(id: doc.documentID, data: doc.data())
                     } ?? []
-                    
-                    print("✅ Samsung wallpapers loaded: \(self.wallpapers.count) items")
-                    
-                    // Log series available in wallpapers
-                    let seriesSet = Set(self.wallpapers.map { $0.series }.filter { !$0.isEmpty })
-                    print("📱 Available series in wallpapers: \(Array(seriesSet))")
                     
                     completion()
                 }
@@ -98,43 +92,31 @@ class FirebaseManager: ObservableObject {
     func fetchBanners(completion: @escaping () -> Void = {}) {
         db.collection("Banners").getDocuments { snapshot, error in
             if let error = error {
-                print("Error fetching banners: \(error)")
+                print("❌ Error fetching banners: \(error)")
                 return
             }
             
             DispatchQueue.main.async {
                 self.banners = snapshot?.documents.map { doc in
-                    Banner(id: doc.documentID, data: doc.data())
+                    return Banner(id: doc.documentID, data: doc.data())
                 } ?? []
+                
                 completion()
             }
         }
     }
     
     func fetchCategories() {
-        print("🔍 Fetching categories from Firebase...")
         db.collection("Categories").getDocuments { snapshot, error in
             if let error = error {
                 print("❌ Error fetching categories: \(error)")
                 return
             }
             
-            print("📊 Categories query completed - Document count: \(snapshot?.documents.count ?? 0)")
-            
-            if let documents = snapshot?.documents {
-                for doc in documents {
-                    print("📄 Category document: \(doc.documentID) - Data: \(doc.data())")
-                }
-            }
-            
             DispatchQueue.main.async {
                 self.categories = snapshot?.documents.map { doc in
                     Category(id: doc.documentID, data: doc.data())
                 } ?? []
-                print("✅ Categories loaded: \(self.categories.count) items")
-                for category in self.categories {
-                    print("📝 Category: \(category.name) (Type: \(category.categoryType))")
-                }
             }
         }
     }
