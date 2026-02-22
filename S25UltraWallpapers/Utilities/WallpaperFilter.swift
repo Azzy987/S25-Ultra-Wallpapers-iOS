@@ -33,4 +33,41 @@ enum WallpaperFilter: String, CaseIterable {
     case dogpatch = "Dogpatch"
     case vesper = "Vesper"
     case amaro = "Amaro"
+    
+    /// Shortened display name for consistent UI spacing
+    var displayName: String {
+        switch self {
+        case .noFilter: return "Original"
+        case .addictiveBlue: return "Add. Blue"
+        case .addictiveRed: return "Add. Red"
+        case .aden: return "Aden"
+        case .brooklyn: return "Brooklyn"
+        case .earlybird: return "Earlybird"
+        case .gingham: return "Gingham"
+        case .hudson: return "Hudson"
+        case .inkwell: return "Inkwell"
+        case .lark: return "Lark"
+        case .lofi: return "Lo-Fi"
+        case .maven: return "Maven"
+        case .mayfair: return "Mayfair"
+        case .moon: return "Moon"
+        case .perpetua: return "Perpetua"
+        case .reyes: return "Reyes"
+        case .rise: return "Rise"
+        case .slumber: return "Slumber"
+        case .stinson: return "Stinson"
+        case .toaster: return "Toaster"
+        case .valencia: return "Valencia"
+        case .walden: return "Walden"
+        case .willow: return "Willow"
+        case .xpro2: return "X-Pro II"
+        case .crema: return "Crema"
+        case .ludwig: return "Ludwig"
+        case .sierra: return "Sierra"
+        case .skyline: return "Skyline"
+        case .dogpatch: return "Dogpatch"
+        case .vesper: return "Vesper"
+        case .amaro: return "Amaro"
+        }
+    }
 }

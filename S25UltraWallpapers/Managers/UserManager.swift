@@ -58,6 +58,8 @@ class UserManager: ObservableObject {
             self.displayName = "Guest User"
             self.email = ""
             self.profileImageURL = nil
+            // Clear premium status when user signs out
+            clearPremiumStatusOnSignOut()
         }
     }
     
@@ -124,6 +126,8 @@ class UserManager: ObservableObject {
                 print("✅ Successfully signed in with Google")
                 Task { @MainActor in
                     self?.updateUserState(user: authResult?.user)
+                    // Sync user data with Firebase
+                    await FirebaseUserDataManager.shared.syncUserDataOnSignIn()
                 }
             }
         }
@@ -144,6 +148,9 @@ class UserManager: ObservableObject {
             
             // Sign out from Google
             GIDSignIn.sharedInstance.signOut()
+            
+            // Clear premium status when signing out
+            clearPremiumStatusOnSignOut()
             
             print("📱 User signed out successfully")
         } catch {
@@ -205,5 +212,92 @@ class UserManager: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         return "Active since: \(formatter.string(from: activeSince))"
+    }
+    
+    // MARK: - Premium Management for Firebase Pricing System
+    
+    func setPremiumStatus(_ isPremium: Bool, plan: PremiumPlan) {
+        let premiumType: PremiumType
+        var expiryDate: Date?
+        
+        switch plan {
+        case .monthly:
+            premiumType = .monthly
+            expiryDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+        case .yearly:
+            premiumType = .yearly
+            expiryDate = Calendar.current.date(byAdding: .year, value: 1, to: Date())
+        case .lifetime:
+            premiumType = .lifetime
+            expiryDate = nil // Lifetime doesn't expire
+        }
+        
+        updatePremiumStatus(type: premiumType, activeSince: Date(), expiryDate: expiryDate)
+        print("✅ Premium status updated: \(premiumType.rawValue)")
+    }
+    
+    func resetPremiumStatus() {
+        updatePremiumStatus(type: .none, activeSince: nil, expiryDate: nil)
+        
+        // Clear test data
+        UserDefaults.standard.removeObject(forKey: "simulate_had_premium")
+        UserDefaults.standard.removeObject(forKey: "premium_plan_type")
+        
+        print("🔄 Premium status reset to free")
+    }
+    
+    // MARK: - Firebase Integration
+    
+    func updateFromFirebase(displayName: String, email: String, profileImageURL: String?) {
+        self.displayName = displayName
+        self.email = email
+        self.profileImageURL = profileImageURL
+    }
+    
+    func setPremiumStatusWithFirebaseSync(_ isPremium: Bool, plan: PremiumPlan) {
+        let premiumType: PremiumType
+        var expiryDate: Date?
+        
+        switch plan {
+        case .monthly:
+            premiumType = .monthly
+            expiryDate = Calendar.current.date(byAdding: .month, value: 1, to: Date())
+        case .yearly:
+            premiumType = .yearly
+            expiryDate = Calendar.current.date(byAdding: .year, value: 1, to: Date())
+        case .lifetime:
+            premiumType = .lifetime
+            expiryDate = nil // Lifetime doesn't expire
+        }
+        
+        let activeSince = Date()
+        
+        // Update local status first
+        updatePremiumStatus(type: premiumType, activeSince: activeSince, expiryDate: expiryDate)
+        
+        // Sync with Firebase
+        Task {
+            await FirebaseUserDataManager.shared.updatePremiumStatus(
+                premium: isPremium,
+                premiumType: premiumType.rawValue,
+                premiumSince: activeSince,
+                premiumExpiry: expiryDate
+            )
+        }
+        
+        print("✅ Premium status updated locally and synced to Firebase: \(premiumType.rawValue)")
+    }
+    
+    // MARK: - Sign Out Premium Handling
+    
+    private func clearPremiumStatusOnSignOut() {
+        // Reset premium status to free when user signs out
+        updatePremiumStatus(type: .none, activeSince: nil, expiryDate: nil)
+        
+        // Clear test data used for simulation
+        UserDefaults.standard.removeObject(forKey: "simulate_had_premium")
+        UserDefaults.standard.removeObject(forKey: "premium_plan_type")
+        
+        print("🔄 Premium status cleared due to sign out")
     }
 }

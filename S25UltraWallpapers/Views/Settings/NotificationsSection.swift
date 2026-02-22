@@ -27,7 +27,8 @@ struct NotificationsSection: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(theme.surface)
-                    .shadow(color: theme.onSurface.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
             )
         }
         .onAppear {

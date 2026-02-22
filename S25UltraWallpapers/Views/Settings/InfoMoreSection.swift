@@ -75,7 +75,7 @@ struct InfoMoreSection: View {
                 
                 // Terms of Use
                 SettingsRow(
-                    icon: "doc.text.circle.fill",
+                    icon: "doc.text.fill",
                     iconColor: .indigo,
                     title: "Terms of Use",
                     subtitle: "App usage terms and conditions",
@@ -105,7 +105,7 @@ struct InfoMoreSection: View {
                 
                 // Report Issues
                 SettingsRow(
-                    icon: "exclamationmark.triangle.circle.fill",
+                    icon: "exclamationmark.triangle.fill",
                     iconColor: .red,
                     title: "Report Issues",
                     subtitle: "Report bugs or technical problems",
@@ -133,7 +133,8 @@ struct InfoMoreSection: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(theme.surface)
-                    .shadow(color: theme.onSurface.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
             )
         }
     }

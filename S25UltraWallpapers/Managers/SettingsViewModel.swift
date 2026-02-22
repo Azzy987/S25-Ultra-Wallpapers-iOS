@@ -15,6 +15,9 @@ class SettingsViewModel: ObservableObject {
     @Published var showingFeatureRequest = false
     @Published var showingChangelog = false
     @Published var isLoadingCacheSize = false
+    @Published var showPremiumRequired = false
+    @Published var showPremiumScreen = false
+    @Published var isSyncingFavorites = false
     
     enum RefreshRate: String, CaseIterable {
         case auto = "Auto (System)"
@@ -170,15 +173,35 @@ class SettingsViewModel: ObservableObject {
     
     func syncFavorites() {
         guard UserManager.shared.isSignedIn else {
-            // Show sign-in prompt
             print("📱 User must sign in to sync favorites")
             return
         }
         
-        // In a real implementation, this would sync with Firebase
-        // For now, just refresh local favorites
-        FavoritesManager.shared.fetchFavorites()
-        print("📱 Favorites synced successfully")
+        guard UserManager.shared.isPremium else {
+            showPremiumRequired = true
+            return
+        }
+        
+        Task {
+            await syncFavoritesToFirebase()
+        }
+    }
+    
+    @MainActor
+    private func syncFavoritesToFirebase() async {
+        isSyncingFavorites = true
+        
+        // Get favorite wallpaper IDs
+        let favoriteIds = FavoritesManager.shared.favorites.map { $0.id }
+        
+        // Sync to Firebase
+        await FirebaseUserDataManager.shared.updateFavorites(favoriteIds)
+        
+        // Wait a moment for visual feedback
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        
+        isSyncingFavorites = false
+        print("✅ Favorites synced to Firebase successfully")
     }
     
     func sendFeatureRequest(title: String, description: String) {

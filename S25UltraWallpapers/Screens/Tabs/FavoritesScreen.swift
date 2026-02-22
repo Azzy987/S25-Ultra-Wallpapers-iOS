@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FavoritesScreen: View {
     @StateObject private var favoritesManager = FavoritesManager.shared
+    @StateObject private var userManager = UserManager.shared
     @EnvironmentObject private var tabManager: TabManager
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
@@ -10,6 +11,7 @@ struct FavoritesScreen: View {
     @State private var toastMessage = ""
     @State private var toastType: ToastView.ToastType = .info
     @State private var hasLoaded = false
+    @State private var isSyncing = false
     
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -28,6 +30,22 @@ struct FavoritesScreen: View {
                     .padding(.vertical)
                 } onRefresh: {
                     await refreshFavoritesData()
+                }
+            }
+            
+            // Premium sync button (bottom left)
+            if userManager.isPremium && userManager.isSignedIn && !favoritesManager.favorites.isEmpty {
+                HStack {
+                    SyncFloatingButton(
+                        isSyncing: $isSyncing,
+                        onSync: {
+                            await syncFavoritesToFirebase()
+                        }
+                    )
+                    .padding(.leading, 16)
+                    .padding(.bottom, 16)
+                    
+                    Spacer()
                 }
             }
             
@@ -75,6 +93,34 @@ struct FavoritesScreen: View {
         
         // Show success toast
         toastMessage = "Favorites refreshed"
+        toastType = .info
+        showToast = true
+    }
+    
+    @MainActor
+    private func syncFavoritesToFirebase() async {
+        guard userManager.isPremium && userManager.isSignedIn else {
+            toastMessage = "Premium subscription required"
+            toastType = .error
+            showToast = true
+            return
+        }
+        
+        isSyncing = true
+        
+        // Get favorite wallpaper IDs
+        let favoriteIds = favoritesManager.favorites.map { $0.id }
+        
+        // Sync to Firebase
+        await FirebaseUserDataManager.shared.updateFavorites(favoriteIds)
+        
+        // Wait a moment for visual feedback
+        try? await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+        
+        isSyncing = false
+        
+        // Show success toast
+        toastMessage = "Favorites synced to cloud ☁️"
         toastType = .info
         showToast = true
     }

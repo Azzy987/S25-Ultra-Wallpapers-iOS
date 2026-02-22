@@ -8,6 +8,7 @@
 import SwiftUI
 import Firebase
 import GoogleSignIn
+import GoogleMobileAds
 
 class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
@@ -37,6 +38,9 @@ struct WallsApp: App {
     @StateObject private var firebaseManager = FirebaseManager.shared
     @StateObject private var favoritesManager = FavoritesManager.shared
     @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var adManager = AdManager.shared
+    @StateObject private var filterLockManager = FilterLockManager.shared
+    @StateObject private var userManager = UserManager.shared
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
     // Removed custom splash to avoid duplicate with Launch Screen
     
@@ -63,6 +67,9 @@ struct WallsApp: App {
                     MainTabView()
                         .environmentObject(firebaseManager)
                         .environmentObject(favoritesManager)
+                        .environmentObject(adManager)
+                        .environmentObject(filterLockManager)
+                        .environmentObject(userManager)
                         .environment(\.appTheme, themeManager.theme)
                         .preferredColorScheme(colorScheme(for: themeManager.themeMode, theme: themeManager.theme))
                 } else {
@@ -71,6 +78,9 @@ struct WallsApp: App {
                     }
                     .environmentObject(firebaseManager)
                     .environmentObject(favoritesManager)
+                    .environmentObject(adManager)
+                    .environmentObject(filterLockManager)
+                    .environmentObject(userManager)
                     .environment(\.appTheme, themeManager.theme)
                     .preferredColorScheme(colorScheme(for: themeManager.themeMode, theme: themeManager.theme))
                 }

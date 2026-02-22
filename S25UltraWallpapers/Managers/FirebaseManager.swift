@@ -92,20 +92,23 @@ class FirebaseManager: ObservableObject {
     }
     
     func fetchBanners(completion: @escaping () -> Void = {}) {
-        db.collection("Banners").getDocuments { snapshot, error in
-            if let error = error {
-                print("❌ Error fetching banners: \(error)")
-                return
-            }
-            
-            DispatchQueue.main.async {
-                self.banners = snapshot?.documents.map { doc in
-                    return Banner(id: doc.documentID, data: doc.data())
-                } ?? []
+        db.collection("Banners")
+            .document("SamsungWallpapers")
+            .collection("S25UltraWallpapersBanners")
+            .getDocuments { snapshot, error in
+                if let error = error {
+                    print("❌ Error fetching banners: \(error)")
+                    return
+                }
                 
-                completion()
+                DispatchQueue.main.async {
+                    self.banners = snapshot?.documents.map { doc in
+                        return Banner(id: doc.documentID, data: doc.data())
+                    } ?? []
+                    
+                    completion()
+                }
             }
-        }
     }
     
     func fetchCategories() {
@@ -211,5 +214,20 @@ class FirebaseManager: ObservableObject {
         }
     }
     
+    /// Fetches a specific wallpaper by ID from a given collection
+    /// Used for instant navigation from banner taps
+    func fetchWallpaperById(_ id: String, collection: String) async throws -> Wallpaper {
+        let document = try await db.collection(collection).document(id).getDocument()
+        
+        guard document.exists, let data = document.data() else {
+            throw NSError(
+                domain: "FirebaseManager",
+                code: 404,
+                userInfo: [NSLocalizedDescriptionKey: "Wallpaper not found in \(collection)"]
+            )
+        }
+        
+        return Wallpaper(id: document.documentID, data: data)
+    }
 
-} 
+}

@@ -7,7 +7,7 @@ struct PagedWallpaperGridView: View {
     
     var body: some View {
         ScrollView {
-            PaginatedWallpaperGrid(
+            PaginatedWallpaperGridWithAds(
                 wallpapers: paginator.wallpapers,
                 isLoading: paginator.isLoading,
                 hasReachedEnd: paginator.hasReachedEnd,

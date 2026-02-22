@@ -18,10 +18,10 @@ struct WallpaperDetailScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appTheme) private var theme
     @StateObject private var favoritesManager = FavoritesManager.shared
+    @StateObject private var adManager = AdManager.shared
+    @StateObject private var viewCountManager = ViewCountManager.shared
+    @StateObject private var toastManager = ToastManager.shared
     @State private var showEditScreen = false
-    @State private var showToast = false
-    @State private var toastMessage = ""
-    @State private var toastType: ToastView.ToastType = .info
     @State private var isDownloading = false
     @State private var isSharing = false
     @State private var isPreparing = false
@@ -182,8 +182,8 @@ struct WallpaperDetailScreen: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                     }
                     
-                    // Collapsible Bottom container - show when main image is loaded and controls are visible
-                    if isMainImageLoaded && showControls {
+                    // Collapsible Bottom container - show when controls are visible (even while image loads)
+                    if showControls {
                         // Swipe instruction text when collapsed and wallpapers available
                         if !isInfoExpanded && wallpapers?.count ?? 0 > 1 {
                             Text("Swipe up or down to change wallpapers")
@@ -231,8 +231,14 @@ struct WallpaperDetailScreen: View {
                 DragGesture()
                     .onChanged { value in
                         let verticalMovement = value.translation.height
-                        let horizontalMovement = abs(value.translation.width)
-                        
+                        let horizontalMovement = value.translation.width
+
+                        // Check if it's a horizontal swipe from left edge (back gesture)
+                        if value.startLocation.x < 50 && horizontalMovement > abs(verticalMovement) {
+                            // This is a back gesture from left edge - don't process
+                            return
+                        }
+
                         // Only process vertical swipes (not horizontal)
                         if abs(verticalMovement) > abs(horizontalMovement) && wallpapers?.count ?? 0 > 1 {
                             // YouTube Shorts style: Allow dragging up to 80% of screen height for smooth interaction
@@ -240,10 +246,10 @@ struct WallpaperDetailScreen: View {
                             let dampingFactor: CGFloat = 0.7 // Increased responsiveness
                             let dampedMovement = verticalMovement * dampingFactor
                             let newDragOffset = max(-maxOffset, min(maxOffset, dampedMovement))
-                            
+
                             // Update dragOffset with smoother response
                             dragOffset = newDragOffset
-                            
+
                             // Load preview images immediately when starting to drag (prevent multiple calls)
                             if dragOffset > 20 && previousWallpaperImage == nil && !isLoadingPreviousPreview {
                                 isLoadingPreviousPreview = true
@@ -256,31 +262,40 @@ struct WallpaperDetailScreen: View {
                     }
                     .onEnded { value in
                         let verticalMovement = value.translation.height
-                        let horizontalMovement = abs(value.translation.width)
+                        let horizontalMovement = value.translation.width
                         let velocity = value.velocity.height
-                        
+
+                        // Check if it's a back gesture from left edge
+                        if value.startLocation.x < 50 && horizontalMovement > 100 && horizontalMovement > abs(verticalMovement) {
+                            // Dismiss the screen with animation
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isPresented = false
+                            }
+                            return
+                        }
+
                         // Only process vertical gestures (not horizontal)
-                        if abs(verticalMovement) > 30 && abs(verticalMovement) > horizontalMovement * 1.5 && wallpapers?.count ?? 0 > 1 {
-                            
+                        if abs(verticalMovement) > 30 && abs(verticalMovement) > abs(horizontalMovement) * 1.5 && wallpapers?.count ?? 0 > 1 {
+
                             // Detect if it's a fast swipe or slow drag based on velocity
                             let isSwipe = abs(velocity) > 500  // 500 points per second threshold
-                            
+
                             // Improved thresholds for better user experience
                             let swipeThreshold = geometry.size.height * 0.12   // 12% for fast swipe (more sensitive)
                             let dragThreshold = geometry.size.height * 0.25    // 25% for slow drag (easier to trigger)
-                            
+
                             let thresholdToUse = isSwipe ? swipeThreshold : dragThreshold
-                            
-                            
+
+
                             if abs(dragOffset) > thresholdToUse {
-                                
+
                                 // Add haptic feedback for successful swipe
                                 let impactFeedback = UIImpactFeedbackGenerator(style: .light)
                                 impactFeedback.impactOccurred()
-                                
+
                                 // Immediately change wallpaper to prevent half-states
                                 handleSwipeNavigation(direction: verticalMovement > 0 ? .down : .up)
-                                
+
                             } else {
                                 // Snap back to current wallpaper with improved elastic animation
                                 withAnimation(.interpolatingSpring(stiffness: 400, damping: 35)) {
@@ -289,7 +304,7 @@ struct WallpaperDetailScreen: View {
                             }
                         } else {
                             // Only handle non-tap drag gestures - taps are handled by onTapGesture
-                            if abs(verticalMovement) >= 10 || horizontalMovement >= 10 {
+                            if abs(verticalMovement) >= 10 || abs(horizontalMovement) >= 10 {
                                 // Snap back if gesture wasn't recognized as a valid swipe
                                 withAnimation(.interpolatingSpring(stiffness: 300, damping: 30)) {
                                     dragOffset = 0
@@ -303,6 +318,13 @@ struct WallpaperDetailScreen: View {
                 loadMainImage()
                 startImageMetadataCalculation()
                 setupAdjacentWallpapers()
+
+                // Track wallpaper view and show interstitial ad if needed
+                trackWallpaperView()
+            }
+            .onDisappear {
+                // Hide any active toasts when leaving the detail screen
+                toastManager.hideToast()
             }
         }
         .navigationBarHidden(true)
@@ -310,15 +332,6 @@ struct WallpaperDetailScreen: View {
         .statusBar(hidden: false)
         .ignoresSafeArea()
         .interactiveDismissDisabled(false)
-        .overlay(alignment: .bottom) {
-            if showToast {
-                ToastView(
-                    message: toastMessage,
-                    type: toastType,
-                    isPresented: $showToast
-                )
-            }
-        }
         .overlay(alignment: .center) {
             if showDownloadSuccess {
                 DownloadSuccessDialog(
@@ -357,25 +370,18 @@ struct WallpaperDetailScreen: View {
     }
     
     private func loadMainImage() {
-        guard let url = URL(string: currentWallpaper.imageUrl) else { 
-            return 
-        }
         isMainImageLoading = true
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let data = data, let image = UIImage(data: data) {
-                DispatchQueue.main.async {
+        loadCachedImage(from: currentWallpaper.imageUrl) { image in
+            DispatchQueue.main.async {
+                if let image = image {
                     withAnimation(.easeIn(duration: 0.3)) {
                         self.mainImage = image
                         self.isMainImageLoaded = true
-                        self.isMainImageLoading = false
                     }
                 }
-            } else {
-                DispatchQueue.main.async {
-                    self.isMainImageLoading = false
-                }
+                self.isMainImageLoading = false
             }
-        }.resume()
+        }
     }
     
     private func startImageMetadataCalculation() {
@@ -422,16 +428,16 @@ struct WallpaperDetailScreen: View {
     }
     
     private func shareWallpaper() {
-        toastMessage = "Preparing to share..."
-        toastType = .info
-        showToast = true
+        toastManager.showInfoToast(message: "Preparing to share...")
         isSharing = true
-        
+        performShare()
+    }
+    
+    private func performShare() {
         loadCachedImage(from: currentWallpaper.imageUrl) { [self] cachedImage in
             guard let image = cachedImage else {
                 DispatchQueue.main.async {
-                    toastMessage = "Failed to load image"
-                    showToast = true
+                    toastManager.showErrorToast(message: "Failed to load image")
                     isSharing = false
                 }
                 return
@@ -448,8 +454,8 @@ struct WallpaperDetailScreen: View {
                     try imageData.write(to: fileURL)
                     
                     DispatchQueue.main.async {
-                        // Create activity items
-                        let activityItems: [Any] = [image, fileURL]
+                        // Create activity items - use fileURL only to avoid duplicate save options
+                        let activityItems: [Any] = [fileURL]
                         
                         let activityVC = UIActivityViewController(
                             activityItems: activityItems,
@@ -461,9 +467,11 @@ struct WallpaperDetailScreen: View {
                         activityVC.completionWithItemsHandler = { _, completed, _, _ in
                             // Clean up temporary file
                             try? FileManager.default.removeItem(at: fileURL)
-                            
+
                             DispatchQueue.main.async {
                                 isSharing = false
+                                // Show interstitial ad after sharing is done (for non-premium users)
+                                self.adManager.showInterstitialAd {}
                             }
                         }
                         
@@ -492,15 +500,13 @@ struct WallpaperDetailScreen: View {
                             topVC.present(activityVC, animated: true)
                         } else {
                             isSharing = false
-                            toastMessage = "Couldn't present share sheet"
-                            showToast = true
+                            toastManager.showErrorToast(message: "Couldn't present share sheet")
                         }
                     }
                 }
             } catch {
                 DispatchQueue.main.async {
-                    toastMessage = "Failed to prepare image for sharing"
-                    showToast = true
+                    toastManager.showErrorToast(message: "Failed to prepare image for sharing")
                     isSharing = false
                 }
             }
@@ -508,26 +514,31 @@ struct WallpaperDetailScreen: View {
     }
 
     private func editWallpaper() {
-        toastMessage = "Preparing to edit..."
-        toastType = .info
-        showToast = true
         isPreparing = true
 
+        // Directly proceed to editing without ad
+        performEdit()
+    }
+
+    private func performEdit() {
         // Load the cached image
         loadCachedImage(from: currentWallpaper.imageUrl) { cachedImage in
             guard let image = cachedImage else {
                 DispatchQueue.main.async {
-                    toastMessage = "Failed to load cached image"
-                    showToast = true
+                    toastManager.showErrorToast(message: "Failed to load image")
                     isPreparing = false
                 }
                 return
             }
 
             DispatchQueue.main.async {
-                originalImage = image
-                showEditScreen = true
+                // Set the image first, then show the screen
+                self.originalImage = image
                 isPreparing = false
+                // Small delay to ensure the image is set before showing
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.showEditScreen = true
+                }
             }
         }
     }
@@ -573,15 +584,17 @@ struct WallpaperDetailScreen: View {
 
     
     private func downloadWallpaper() {
-        toastMessage = "Downloading wallpaper..."
-        toastType = .download
-        showToast = true
+        toastManager.showDownloadToast(message: "Downloading wallpaper...")
+        checkPermissionAndDownload()
+    }
+    
+    private func checkPermissionAndDownload() {
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
         switch status {
         case .notDetermined:
             PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
                 if status == .authorized {
-                    downloadAndSaveWallpaper()
+                    self.downloadAndSaveWallpaper()
                 }
             }
         case .authorized, .limited:
@@ -597,8 +610,7 @@ struct WallpaperDetailScreen: View {
         loadCachedImage(from: currentWallpaper.imageUrl) { image in
             guard let originalImage = image else {
                 DispatchQueue.main.async {
-                    self.toastMessage = "Failed to download wallpaper"
-                    self.showToast = true
+                    self.toastManager.showErrorToast(message: "Failed to download wallpaper")
                     self.isDownloading = false
                 }
                 return
@@ -608,8 +620,7 @@ struct WallpaperDetailScreen: View {
             guard let jpegData = originalImage.jpegData(compressionQuality: 0.9),
                   let jpegImage = UIImage(data: jpegData) else {
                 DispatchQueue.main.async {
-                    self.toastMessage = "Failed to convert image format"
-                    self.showToast = true
+                    self.toastManager.showErrorToast(message: "Failed to convert image format")
                     self.isDownloading = false
                 }
                 return
@@ -624,9 +635,12 @@ struct WallpaperDetailScreen: View {
                     self.isDownloading = false
                     if success {
                         self.showDownloadSuccess = true
+                        // Show interstitial ad after download dialog is shown (delayed so user sees success first)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                            self.adManager.showInterstitialAd {}
+                        }
                     } else {
-                        self.toastMessage = "Failed to save wallpaper: \(error?.localizedDescription ?? "Unknown error")"
-                        self.showToast = true
+                        self.toastManager.showErrorToast(message: "Failed to save wallpaper: \(error?.localizedDescription ?? "Unknown error")")
                     }
                 }
             }
@@ -634,16 +648,8 @@ struct WallpaperDetailScreen: View {
     }
     
     private func toggleFavorite() {
-        if favoritesManager.isFavorite(currentWallpaper.id) {
-            _ = favoritesManager.toggleFavorite(wallpaper: currentWallpaper)
-            toastMessage = "\(currentWallpaper.wallpaperName) removed from favorites"
-            toastType = .unfavorite
-        } else {
-            _ = favoritesManager.toggleFavorite(wallpaper: currentWallpaper)
-            toastMessage = "\(currentWallpaper.wallpaperName) added to favorites"
-            toastType = .favorite
-        }
-        showToast = true
+        let isAdded = favoritesManager.toggleFavorite(wallpaper: currentWallpaper)
+        toastManager.showFavoriteToast(wallpaperName: currentWallpaper.wallpaperName, isAdded: isAdded)
     }
     
     func downloadImage(from urlString: String, completion: @escaping (UIImage?) -> Void) {
@@ -727,8 +733,7 @@ struct WallpaperDetailScreen: View {
             guard let image = cachedImage,
                   let imageData = image.pngData() else {
                 DispatchQueue.main.async {
-                    toastMessage = "Failed to prepare image"
-                    showToast = true
+                    toastManager.showErrorToast(message: "Failed to prepare image")
                     isSharing = false
                 }
                 return
@@ -758,9 +763,36 @@ struct WallpaperDetailScreen: View {
                 }
             } catch {
                 DispatchQueue.main.async {
-                    toastMessage = "Failed to prepare image for sharing"
-                    showToast = true
+                    toastManager.showErrorToast(message: "Failed to prepare image for sharing")
                     isSharing = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - View and Ad Tracking
+    
+    private func trackWallpaperView() {
+        viewCountManager.recordWallpaperView()
+        
+        // Check if we should show interstitial ad for view count
+        if viewCountManager.shouldShowInterstitialForView() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.adManager.showInterstitialAd {
+                    // Ad completed
+                }
+            }
+        }
+    }
+    
+    private func trackSwipeInDetailScreen() {
+        viewCountManager.recordSwipeInDetailScreen()
+        
+        // Check if we should show interstitial ad for swipe count
+        if viewCountManager.shouldShowInterstitialForSwipe() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.adManager.showInterstitialAd {
+                    // Ad completed
                 }
             }
         }
@@ -820,6 +852,9 @@ struct WallpaperDetailScreen: View {
         previousWallpaperImage = nil
         
         setupAdjacentWallpapers()
+        
+        // Track swipe and show interstitial ad if needed
+        trackSwipeInDetailScreen()
         
         // Haptic feedback
         let impactFeedback = UIImpactFeedbackGenerator(style: .light)
@@ -1081,7 +1116,7 @@ struct CollapsibleInfoContainer: View {
                         )
                         
                         CircleActionButton(
-                            icon: "slider.horizontal.3",
+                            icon: "pencil",
                             isLoading: isPreparing,
                             action: editAction
                         )

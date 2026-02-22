@@ -52,8 +52,7 @@ struct SettingsScreen: View {
             .background(theme.background)
         }
         .navigationViewStyle(.stack)
-        .environment(\.colorScheme, themeManager.themeMode == .dark ? .dark : .light)
-        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
+        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : (themeManager.themeMode == .light ? .light : nil))
         // Sheet presentations for dialogs
         .sheet(isPresented: $settingsViewModel.showingPrivacyPolicy) {
             ContentDialog(
@@ -75,6 +74,9 @@ struct SettingsScreen: View {
         }
         .sheet(isPresented: $settingsViewModel.showingFeatureRequest) {
             FeatureRequestDialog(settingsViewModel: settingsViewModel)
+        }
+        .fullScreenCover(isPresented: $settingsViewModel.showPremiumScreen) {
+            PremiumScreen()
         }
     }
 }

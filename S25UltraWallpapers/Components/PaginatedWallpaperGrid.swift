@@ -7,14 +7,15 @@ struct PaginatedWallpaperGrid: View {
     let onLoadMore: () -> Void
     @Environment(\.appTheme) private var theme
     
-    private let horizontalPadding: CGFloat = 8
-    private let interItemSpacing: CGFloat = 12
-    private let cellHeight: CGFloat = 280 // Updated for new WallpaperCard design (220 image + 60 text area)
+    private let horizontalPadding: CGFloat = 6 // 6px on each side = 12px total (further reduced)
+    private let interItemSpacing: CGFloat = 8 // Space between cards (further reduced)
+    private let cellHeight: CGFloat = 300 // Updated for new WallpaperCard design (240 image + 60 text area)
     
-    // Calculate width based on screen width
+    // Calculate width based on screen width with reduced spacing for wider cards
     private var itemWidth: CGFloat {
         let screenWidth = UIScreen.main.bounds.width
-        return (screenWidth / 2) - 16
+        let totalHorizontalSpacing = horizontalPadding * 2
+        return (screenWidth - totalHorizontalSpacing - interItemSpacing) / 2
     }
     
     var body: some View {

@@ -67,7 +67,7 @@ struct TrendingScreen: View {
                     
                     // Wallpapers Section
                     else if !paginator.wallpapers.isEmpty {
-                        PaginatedWallpaperGrid(
+                        PaginatedWallpaperGridWithAds(
                             wallpapers: paginator.wallpapers,
                             isLoading: paginator.isLoading,
                             hasReachedEnd: paginator.hasReachedEnd,

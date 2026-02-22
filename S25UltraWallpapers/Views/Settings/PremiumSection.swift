@@ -20,11 +20,11 @@ struct PremiumSection: View {
 struct PremiumActiveCard: View {
     @StateObject private var userManager = UserManager.shared
     @Environment(\.appTheme) private var theme
+    @State private var showPremiumDetails = false
     
     var body: some View {
         Button(action: {
-            // Open subscription management
-            print("📱 Opening subscription management")
+            showPremiumDetails = true
         }) {
             VStack(spacing: 0) {
                 HStack(spacing: 16) {
@@ -46,7 +46,7 @@ struct PremiumActiveCard: View {
                     // Premium Info
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
-                            Text("Premium Active")
+                            Text("Premium Subscription")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(theme.onSurface)
                             
@@ -59,17 +59,8 @@ struct PremiumActiveCard: View {
                             .font(.system(size: 14))
                             .foregroundColor(theme.onSurfaceVariant)
                         
-                        if let activeSinceText = userManager.premiumActiveSinceText {
-                            Text(activeSinceText)
-                                .font(.system(size: 12))
-                                .foregroundColor(theme.onSurfaceVariant)
-                        }
-                        
-                        if let expiryText = userManager.premiumExpiryText {
-                            Text(expiryText)
-                                .font(.system(size: 12))
-                                .foregroundColor(.orange)
-                        }
+                        // Premium validity
+                        premiumValidityText
                     }
                     
                     Spacer()
@@ -84,16 +75,41 @@ struct PremiumActiveCard: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(theme.surface)
-                    .shadow(color: theme.onSurface.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .sheet(isPresented: $showPremiumDetails) {
+            PremiumDetailsSheet()
+        }
+    }
+    
+    @ViewBuilder
+    private var premiumValidityText: some View {
+        if userManager.premiumType == .lifetime {
+            Text("Valid for lifetime")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.green)
+        } else if let expiryDate = userManager.premiumExpiryDate {
+            Text("Valid until \(formatDate(expiryDate))")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.orange)
+        }
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
     }
 }
 
 struct UpgradeToPremiumCard: View {
     @Environment(\.appTheme) private var theme
+    @StateObject private var userManager = UserManager.shared
     @State private var showPremiumScreen = false
+    @State private var showRewardOffers = false
     
     var body: some View {
         Button(action: {
@@ -126,12 +142,6 @@ struct UpgradeToPremiumCard: View {
                             .font(.system(size: 14))
                             .foregroundColor(theme.onSurfaceVariant)
                             .multilineTextAlignment(.leading)
-                        
-                        HStack(spacing: 12) {
-                            FeatureBadge(text: "4K Quality")
-                            FeatureBadge(text: "No Ads")
-                            FeatureBadge(text: "Exclusive")
-                        }
                     }
                     
                     Spacer()
@@ -146,13 +156,18 @@ struct UpgradeToPremiumCard: View {
             .background(
                 RoundedRectangle(cornerRadius: 16)
                     .fill(theme.surface)
-                    .shadow(color: theme.onSurface.opacity(0.1), radius: 2, x: 0, y: 1)
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
         .fullScreenCover(isPresented: $showPremiumScreen) {
             PremiumScreen()
         }
+        .sheet(isPresented: $showRewardOffers) {
+            FreeRewardsSheet()
+        }
+        
     }
 }
 

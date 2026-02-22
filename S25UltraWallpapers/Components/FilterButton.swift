@@ -8,44 +8,78 @@ struct FilterButton: View {
     let filter: WallpaperFilter
     let isSelected: Bool
     let image: UIImage
+    let wallpaperId: String
     let action: () -> Void
+    let onLockedTap: () -> Void
+    
     @Environment(\.appTheme) private var theme
+    @EnvironmentObject private var filterLockManager: FilterLockManager
     
     @State private var filteredPreview: UIImage?
     @State private var isLoading = true
     
     // MARK: - Body
     var body: some View {
-        Button(action: action) {
+        let isUnlocked = filterLockManager.isFilterUnlocked(filter, for: wallpaperId)
+        
+        Button(action: {
+            if isUnlocked {
+                action()
+            } else {
+                onLockedTap()
+            }
+        }) {
             VStack(spacing: 8) {
-                if isLoading {
-                    ProgressView()
-                        .frame(width: 90, height: 120)
-                        .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+                ZStack {
+                    if isLoading {
+                        ProgressView()
+                            .frame(width: 60, height: 80)
+                            .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
 
-                } else {
-                    (filteredPreview != nil ? Image(uiImage: filteredPreview!) : Image(uiImage: image))
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 90, height: 120)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(isSelected ? theme.primary : Color.clear, lineWidth: 4)
-                        )
+                    } else {
+                        (filteredPreview != nil ? Image(uiImage: filteredPreview!) : Image(uiImage: image))
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                            .frame(width: 60, height: 80)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(isSelected ? theme.primary : Color.clear, lineWidth: 2)
+                            )
+                            .opacity(isUnlocked ? 1.0 : 0.5)
+                    }
+                    
+                    // Lock overlay for locked filters
+                    if !isUnlocked && !isLoading {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Color.black.opacity(0.3))
+                            .frame(width: 60, height: 80)
+                            .overlay(
+                                Image(systemName: "lock.fill")
+                                    .font(.title2)
+                                    .foregroundColor(.white)
+                            )
+                    }
                 }
                 
-                Text(filter.rawValue)
+                Text(filter.displayName)
                     .font(.caption)
-                    .foregroundColor(theme.onSurface)
+                    .foregroundColor(isUnlocked ? theme.onSurface : theme.onSurface.opacity(0.6))
+                    .lineLimit(1)
             }
         }
         .onAppear {
+            let isUnlocked = filterLockManager.isFilterUnlocked(filter, for: wallpaperId)
+            
             if filter == .noFilter {
                 self.filteredPreview = image
                 self.isLoading = false
-            } else {
+            } else if isUnlocked {
                 generateFilterPreview()
+            } else {
+                // For locked filters, show original image as preview
+                self.filteredPreview = image
+                self.isLoading = false
             }
         }
     }
@@ -72,7 +106,7 @@ struct FilterButton: View {
             ])
             
             // Resize image for preview
-            let size = CGSize(width: 90, height: 120)
+            let size = CGSize(width: 60, height: 80)
             let resizedImage = image.resized(to: size)
             
             guard let ciImage = CIImage(image: resizedImage) else {

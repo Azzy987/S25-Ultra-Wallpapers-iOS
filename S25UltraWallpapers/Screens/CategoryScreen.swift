@@ -57,20 +57,35 @@ struct CategoryScreen: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
+                                    // Check if it's a back gesture from left edge
+                                    if value.startLocation.x < 50 && value.translation.width > 0 {
+                                        // This is a potential back gesture from left edge
+                                        // Only track it if we're on the first page
+                                        if viewModel.currentIndex == 0 {
+                                            return
+                                        }
+                                    }
                                     // Let the view track the finger's movement
                                     dragOffset = value.translation.width
                                 }
                                 .onEnded { value in
+                                    // Check if it's a back gesture from left edge on first page
+                                    if value.startLocation.x < 50 && value.translation.width > 100 && viewModel.currentIndex == 0 {
+                                        // Dismiss the screen with animation
+                                        dismiss()
+                                        return
+                                    }
+
                                     let threshold = screenWidth / 3 // User must swipe at least 1/3 of the screen
                                     var newIndex = viewModel.currentIndex
-                                    
+
                                     // Check if swipe was far enough to trigger a page change
                                     if value.translation.width < -threshold { // Swiped left
                                         newIndex = min(viewModel.currentIndex + 1, allSubcategories.count - 1)
                                     } else if value.translation.width > threshold { // Swiped right
                                         newIndex = max(viewModel.currentIndex - 1, 0)
                                     }
-                                    
+
                                     // Animate the snap to the final position
                                     withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                         viewModel.currentIndex = newIndex

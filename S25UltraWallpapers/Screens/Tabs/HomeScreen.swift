@@ -35,7 +35,6 @@ struct HomeScreen: View {
     @State private var showDetailScreen = false
     @State private var selectedBannerWallpaper: Wallpaper?
     @State private var isDraggingBanner = false
-    @State private var isLoadingBannerDetail = false
     
     // Sort related states
     @State private var selectedSort: HomeSortOption = .releaseDate
@@ -79,33 +78,6 @@ struct HomeScreen: View {
                 WallpaperDetailScreen(wallpaper: wallpaper, isPresented: $showDetailScreen)
             }
         }
-        .overlay(
-            // Loading overlay for banner detail loading
-            Group {
-                if isLoadingBannerDetail {
-                    ZStack {
-                        Color.black.opacity(0.7)
-                            .ignoresSafeArea()
-                        
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                .scaleEffect(1.5)
-                            
-                            Text("Loading wallpaper...")
-                                .font(.subheadline)
-                                .foregroundColor(.white)
-                        }
-                        .padding(24)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(.ultraThinMaterial)
-                        )
-                    }
-                    .transition(.opacity)
-                }
-            }
-        )
         .onAppear {
             // Only mark as active and load if this is the active tab
             if tabManager.isTabActive(0) {
@@ -165,21 +137,22 @@ struct HomeScreen: View {
                         // Only handle horizontal swipes when horizontal movement is significantly more than vertical
                         let horizontalDistance = abs(value.translation.width)
                         let verticalDistance = abs(value.translation.height)
-                        
+
                         // Only trigger banner drag if horizontal movement is at least 2x vertical movement
                         if horizontalDistance > verticalDistance * 2 && horizontalDistance > 30 {
                             isDraggingBanner = true
+                            BannerDragState.shared.isDragging = true
                             stopAutoScroll()
                         }
                     }
                     .onEnded { value in
                         let horizontalDistance = abs(value.translation.width)
                         let verticalDistance = abs(value.translation.height)
-                        
+
                         // Only handle horizontal swipes when clearly horizontal
                         if horizontalDistance > verticalDistance * 2 && horizontalDistance > 30 {
                             let scrollThreshold: CGFloat = 50
-                            
+
                             if abs(value.translation.width) > scrollThreshold {
                                 withAnimation(.easeInOut(duration: 0.3)) {
                                     if value.translation.width > 0 {
@@ -189,18 +162,19 @@ struct HomeScreen: View {
                                     // Swiped left - go to next banner
                                     currentIndex = min(cards.count - 1, currentIndex + 1)
                                 }
-                                
+
                                 // Scroll to the new index
                                 proxy.scrollTo(currentIndex, anchor: UnitPoint.center)
                             }
                             }
                         }
-                        
+
                         // Reset dragging state after a short delay to prevent tap
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                             isDraggingBanner = false
+                            BannerDragState.shared.isDragging = false
                         }
-                        
+
                         // Resume auto-scroll after manual interaction
                         if isScreenActive && cards.count > 1 {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
@@ -429,7 +403,7 @@ struct HomeScreen: View {
             }
                                     .padding(.horizontal)
                                 
-            PaginatedWallpaperGrid(
+            PaginatedWallpaperGridWithAds(
                                     wallpapers: paginator.wallpapers,
                 isLoading: paginator.isLoading,
                 hasReachedEnd: paginator.hasReachedEnd,
@@ -665,41 +639,28 @@ struct HomeScreen: View {
     // MARK: - Banner Helper Functions
     
     private func handleBannerTap(card: CarouselCard) {
-        
-        // Show loading immediately
-        withAnimation(.easeInOut(duration: 0.2)) {
-            isLoadingBannerDetail = true
-        }
-        
         // Find wallpaper by matching document ID in Samsung collection
         if let wallpaper = firebaseManager.wallpapers.first(where: { wallpaper in
             let wallpaperDocumentId = String(wallpaper.id.prefix(36))
             return wallpaperDocumentId == card.id || wallpaper.id == card.id
         }) {
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    self.isLoadingBannerDetail = false
-                }
-                self.selectedBannerWallpaper = wallpaper
-                self.showDetailScreen = true
-            }
-        } 
+            selectedBannerWallpaper = wallpaper
+            showDetailScreen = true
+        }
         // Find wallpaper by matching document ID in TrendingWallpapers collection
         else if let trendingWallpaper = firebaseManager.trendingWallpapers.first(where: { wallpaper in
             let wallpaperDocumentId = String(wallpaper.id.prefix(36))
             return wallpaperDocumentId == card.id || wallpaper.id == card.id
         }) {
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    self.isLoadingBannerDetail = false
-                }
-                self.selectedBannerWallpaper = trendingWallpaper
-                self.showDetailScreen = true
-            }
-        } 
-        // If not found in cached collections, fetch from Firebase using document ID
+            selectedBannerWallpaper = trendingWallpaper
+            showDetailScreen = true
+        }
+        // If not found in cached collections, create wallpaper from banner immediately
         else {
-            fetchWallpaperByDocumentId(card: card)
+            // Create wallpaper from banner data immediately (no Firebase fetch delay)
+            let wallpaper = createWallpaperFromBanner(card)
+            selectedBannerWallpaper = wallpaper
+            showDetailScreen = true
         }
     }
     
@@ -715,9 +676,6 @@ struct HomeScreen: View {
             if let document = snapshot, document.exists, let data = document.data() {
                 let wallpaper = Wallpaper(id: card.id, data: data)
                 DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        self.isLoadingBannerDetail = false
-                    }
                     self.selectedBannerWallpaper = wallpaper
                     self.showDetailScreen = true
                 }
@@ -730,16 +688,10 @@ struct HomeScreen: View {
     private func searchTrendingWallpaperById(card: CarouselCard) {
         // Try TrendingWallpapers collection (direct document lookup by ID)
         firebaseManager.db.collection("TrendingWallpapers").document(card.id).getDocument { snapshot, error in
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    self.isLoadingBannerDetail = false
-                }
-            }
-            
             if error != nil {
                 return
             }
-            
+
             if let document = snapshot, document.exists, let data = document.data() {
                 let wallpaper = Wallpaper(id: card.id, data: data)
                 DispatchQueue.main.async {
@@ -798,10 +750,6 @@ struct HomeScreen: View {
         
         // Handle results when both queries complete
         dispatchGroup.notify(queue: .main) {
-            withAnimation(.easeInOut(duration: 0.2)) {
-                self.isLoadingBannerDetail = false
-            }
-            
             if let wallpaper = foundWallpaper {
                 self.selectedBannerWallpaper = wallpaper
                 self.showDetailScreen = true

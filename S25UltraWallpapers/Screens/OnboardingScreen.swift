@@ -186,17 +186,16 @@ struct OnboardingPageView: View {
                 
                 // Button
                 Button(action: onButtonTap) {
-                    HStack {
+                    HStack(spacing: 8) {
                         Text(buttonText)
                             .font(.system(size: 18, weight: .semibold))
                             .foregroundColor(.white)
-                        
-                        Spacer()
                         
                         Image(systemName: "arrow.right")
                             .font(.system(size: 16, weight: .medium))
                             .foregroundColor(.white)
                     }
+                    .frame(maxWidth: .infinity)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 16)
                     .background(
