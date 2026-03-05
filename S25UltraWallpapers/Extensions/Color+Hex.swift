@@ -17,8 +17,3 @@ extension Color {
         self.init(red: r, green: g, blue: b)
     }
 }
-
-// Add this protocol
-protocol ColorHexInitializable {
-    init(hex: String)
-} 

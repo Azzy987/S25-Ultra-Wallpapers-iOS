@@ -3,7 +3,6 @@ import SwiftUI
 struct FavoritesScreen: View {
     @StateObject private var favoritesManager = FavoritesManager.shared
     @StateObject private var userManager = UserManager.shared
-    @EnvironmentObject private var tabManager: TabManager
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var scrollViewHelper = ScrollViewHelper()
@@ -19,16 +18,17 @@ struct FavoritesScreen: View {
             if favoritesManager.favorites.isEmpty {
                 EmptyStateViewFavorites()
             } else {
-                // The CustomRefreshView is now only created when there are items to show
-                CustomRefreshView(showsIndicator: false) {
+                ScrollView(.vertical, showsIndicators: false) {
                     PaginatedWallpaperGrid(
                         wallpapers: favoritesManager.favorites,
                         isLoading: false,
                         hasReachedEnd: true,
                         onLoadMore: {}
                     )
+                    .environmentObject(FavoritesManager.shared)
                     .padding(.vertical)
-                } onRefresh: {
+                }
+                .refreshable {
                     await refreshFavoritesData()
                 }
             }
@@ -68,15 +68,7 @@ struct FavoritesScreen: View {
             }
         }
         .onAppear {
-            // Only load favorites if this is the active tab
-            if tabManager.isTabActive(3) && !hasLoaded {
-                favoritesManager.fetchFavorites()
-                hasLoaded = true
-            }
-        }
-        .onChange(of: tabManager.activeTab) { activeTab in
-            if activeTab == 3 && !hasLoaded {
-                // Tab became active and hasn't loaded yet
+            if !hasLoaded {
                 favoritesManager.fetchFavorites()
                 hasLoaded = true
             }

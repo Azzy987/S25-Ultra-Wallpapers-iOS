@@ -29,7 +29,6 @@ class CategoryViewModel: ObservableObject {
     
     init(category: Category) {
         self.category = category
-        print("🏠 [CATEGORY INIT] Category: \(category.name), Type: \(category.categoryType), Subcategories: \(category.subcategories)")
         loadInitialData()
     }
     
@@ -37,90 +36,68 @@ class CategoryViewModel: ObservableObject {
         if let existingPaginator = paginators[subcategory] {
             return existingPaginator
         }
-        
-        // Create paginator on demand if it doesn't exist
         let newPaginator = createPaginator(for: subcategory)
         paginators[subcategory] = newPaginator
         return newPaginator
     }
+
+    /// Returns the paginator for the given subcategory, triggering initial load if not yet loaded.
+    func loadPaginator(for subcategory: String) {
+        let p = paginator(for: subcategory)
+        if p.wallpapers.isEmpty && !p.isLoading {
+            p.loadInitialWallpapers()
+        }
+    }
     
     private func createPaginator(for subcategory: String) -> FirestorePaginator {
-        print("🔍 Creating paginator for subcategory: \(subcategory)")
-        print("🔍 Current series filter: \(currentSeriesFilter ?? "nil")")
         let query: Query
-        
+        let db = FirebaseManager.shared.db
+
         if subcategory == "All" || subcategory == "All Series" {
-            // Check if there's a series filter applied
             if category.categoryType == "brand" && category.name == "Samsung" {
                 if let seriesFilter = currentSeriesFilter {
-                    // Apply series filter for "All Series"
-                    print("🔍 Creating filtered Samsung query for series: \(seriesFilter)")
-                    query = FirebaseManager.shared.db.collection("Samsung")
+                    // Single whereField — no composite index needed
+                    query = db.collection("Samsung")
                         .whereField("series", isEqualTo: seriesFilter)
-                        .order(by: "timestamp", descending: true)
                 } else {
-                    // No series filter, show all Samsung wallpapers
-                    print("🔍 Creating unfiltered Samsung query")
-                    query = FirebaseManager.shared.db.collection("Samsung")
+                    // Single orderBy on timestamp — single-field index exists by default
+                    query = db.collection("Samsung")
                         .order(by: "timestamp", descending: true)
                 }
             } else {
-                print("🔍 Creating TrendingWallpapers query")
-                query = FirebaseManager.shared.db.collection("TrendingWallpapers")
+                // Non-Samsung categories live in TrendingWallpapers collection
+                // Single whereField — no composite index needed
+                query = db.collection("TrendingWallpapers")
                     .whereField("category", isEqualTo: category.name)
-                    .order(by: "timestamp", descending: true)
             }
         } else {
-            // Filter by subcategory
             if category.categoryType == "brand" && category.name == "Samsung" {
-                print("🔍 Creating Samsung subcategory query for: \(subcategory)")
-                query = FirebaseManager.shared.db.collection("Samsung")
+                // Single whereField — no composite index needed
+                query = db.collection("Samsung")
                     .whereField("series", isEqualTo: subcategory)
-                    .order(by: "timestamp", descending: true)
             } else {
-                print("🔍 Creating TrendingWallpapers subcategory query")
-                query = FirebaseManager.shared.db.collection("TrendingWallpapers")
+                // Two whereFields — no orderBy, so no composite index needed
+                query = db.collection("TrendingWallpapers")
                     .whereField("category", isEqualTo: category.name)
                     .whereField("subCategory", isEqualTo: subcategory)
-                    .order(by: "timestamp", descending: true)
             }
         }
-        
-        let paginator = FirestorePaginator(baseQuery: query)
-        
-        print("📎 [PAGINATOR] Created paginator for \(subcategory), loading initial wallpapers...")
-        // Load initial data immediately
-        paginator.loadInitialWallpapers()
-        
-        return paginator
+
+        return FirestorePaginator(baseQuery: query)
     }
     
     private func loadInitialData() {
-        print("📊 [LOAD DATA] Loading initial data for category: \(category.name)")
-        // Load subcategories based on category type
         if category.categoryType == "brand" && category.name == "Samsung" {
-            print("📊 [LOAD DATA] Loading Samsung series data")
-            // For Samsung, get series from Samsung collection
             loadSamsungSeries()
         } else {
-            print("📊 [LOAD DATA] Setting up main category subcategories")
-            // For main categories, use subcategories from category object
             setupMainCategorySubcategories()
         }
     }
-    
+
     private func setupMainCategorySubcategories() {
-        print("📋 [SUBCATEGORIES] Setting up subcategories for \(category.name): \(category.subcategories)")
-        // Filter out "None" subcategories
         let filteredSubcategories = category.subcategories.filter { $0.lowercased() != "none" }
-        
-        print("📋 [SUBCATEGORIES] Filtered subcategories: \(filteredSubcategories)")
-        
         if !filteredSubcategories.isEmpty {
             availableSubcategories = filteredSubcategories
-            print("📋 [SUBCATEGORIES] Set available subcategories: \(availableSubcategories)")
-        } else {
-            print("⚠️ [SUBCATEGORIES] No valid subcategories found!")
         }
     }
     
@@ -139,40 +116,17 @@ class CategoryViewModel: ObservableObject {
     }
     
     func applySeriesFilter(_ series: String?) {
-        print("🔍 Applying series filter: \(series ?? "nil")")
-        
-        // Update the filter first
         currentSeriesFilter = series
-        
-        // Clear existing paginators to force recreation with new filter
         paginators.removeAll()
-        print("🔍 Cleared paginators")
-        
-        // Set the correct index based on the selected series
-        if let series = series {
-            // Find the series in the list and set the correct index
-            if let seriesIndex = availableSeries.firstIndex(of: series) {
-                // Set to the specific series (add 1 because "All Series" is at index 0)
-                currentIndex = seriesIndex + 1
-                print("🔍 Set currentIndex to \(currentIndex) for series: \(series)")
-            } else {
-                // Series not found, default to "All Series"
-                currentIndex = 0
-                print("🔍 Series '\(series)' not found, reset to index 0")
-            }
+
+        if let series = series, let seriesIndex = availableSeries.firstIndex(of: series) {
+            currentIndex = seriesIndex + 1
         } else {
-            // No filter selected, go to "All" or "All Series"
             currentIndex = 0
-            print("🔍 No series filter, reset to index 0")
         }
-        
-        // Force UI refresh since allSubcategories computed property changed
+
         objectWillChange.send()
-        
-        // Force immediate recreation and loading of the appropriate paginator
-        let subcategory = allSubcategories[currentIndex]
-        let newPaginator = paginator(for: subcategory)
-        print("🔍 Created new paginator for '\(subcategory)' with \(newPaginator.wallpapers.count) wallpapers loaded")
+        loadPaginator(for: allSubcategories[currentIndex])
     }
     
     // Helper function to clear series filter and return to normal subcategories

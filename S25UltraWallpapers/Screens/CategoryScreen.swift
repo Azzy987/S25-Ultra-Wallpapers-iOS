@@ -39,21 +39,26 @@ struct CategoryScreen: View {
                     GeometryReader { geo in
                         let screenWidth = geo.size.width
                         let allSubcategories = viewModel.allSubcategories
-                        
+
                         HStack(spacing: 0) {
                             // Create a page for each subcategory
-                            ForEach(allSubcategories, id: \.self) { subcategory in
+                            ForEach(Array(allSubcategories.enumerated()), id: \.element) { index, subcategory in
                                 // Get the correct paginator from the ViewModel for this specific page
                                 let paginator = viewModel.paginator(for: subcategory)
-                                
+
                                 // Display the grid for that paginator
                                 PagedWallpaperGridView(paginator: paginator)
                                     .frame(width: screenWidth)
                             }
                         }
-                        // 7. The offset is calculated based on the current page and the live drag
+                        // The offset is calculated based on the current page and the live drag
                         .offset(x: -CGFloat(viewModel.currentIndex) * screenWidth + dragOffset)
                         .animation(.none, value: dragOffset) // No animation on drag
+                        .onChange(of: viewModel.currentIndex) { newIndex in
+                            if newIndex < allSubcategories.count {
+                                viewModel.loadPaginator(for: allSubcategories[newIndex])
+                            }
+                        }
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
@@ -217,10 +222,7 @@ struct CategoryScreen: View {
     }
     
     private func loadInitialData() {
-        // ViewModel handles all initialization automatically
-        // Load initial wallpapers for the first page
-        let firstPaginator = viewModel.paginator(for: viewModel.allSubcategories[0])
-        firstPaginator.loadInitialWallpapers()
+        viewModel.loadPaginator(for: viewModel.allSubcategories[0])
     }
     
 }

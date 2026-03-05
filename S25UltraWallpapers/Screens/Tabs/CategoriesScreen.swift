@@ -2,7 +2,6 @@ import SwiftUI
 
 struct CategoriesScreen: View {
     @EnvironmentObject private var firebaseManager: FirebaseManager
-    @EnvironmentObject private var tabManager: TabManager
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
     @State private var hasLoaded = false
@@ -17,7 +16,7 @@ struct CategoriesScreen: View {
     
     var body: some View {
         NavigationView {
-            CustomRefreshView(showsIndicator: false) {
+            ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 16) {
                     ForEach(filteredCategories) { category in
                         CategoryCard(category: category)
@@ -28,7 +27,8 @@ struct CategoriesScreen: View {
                     }
                 }
                 .padding()
-            } onRefresh: {
+            }
+            .refreshable {
                 await refreshCategoriesData()
             }
             .navigationBarHidden(true)
@@ -40,15 +40,7 @@ struct CategoriesScreen: View {
             CategoryScreen(category: category)
         }
         .onAppear {
-            // Only load categories if this is the active tab
-            if tabManager.isTabActive(1) && !hasLoaded {
-                firebaseManager.fetchCategories()
-                hasLoaded = true
-            }
-        }
-        .onChange(of: tabManager.activeTab) { activeTab in
-            if activeTab == 1 && !hasLoaded {
-                // Tab became active and hasn't loaded yet
+            if !hasLoaded {
                 firebaseManager.fetchCategories()
                 hasLoaded = true
             }

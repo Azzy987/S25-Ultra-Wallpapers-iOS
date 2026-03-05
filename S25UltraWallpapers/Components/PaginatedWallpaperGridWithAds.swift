@@ -13,28 +13,24 @@ struct PaginatedWallpaperGridWithAds: View {
     let isLoading: Bool
     let hasReachedEnd: Bool
     let onLoadMore: () -> Void
-    
+
     @Environment(\.appTheme) private var theme
     @StateObject private var adManager = AdManager.shared
-    
-    private let horizontalPadding: CGFloat = 6 // 6px on each side = 12px total (reduced)
-    private let interItemSpacing: CGFloat = 8 // Space between cards (reduced)
-    private let cellHeight: CGFloat = 280
-    
-    // Calculate width based on screen width with fixed spacing
-    private var itemWidth: CGFloat {
-        let screenWidth = UIScreen.main.bounds.width
-        let totalHorizontalSpacing = horizontalPadding * 2
-        return (screenWidth - totalHorizontalSpacing - interItemSpacing) / 2
+    @EnvironmentObject private var favoritesManager: FavoritesManager
+
+    private let horizontalPadding: CGFloat = 6
+    private let interItemSpacing: CGFloat = 8
+
+    private let adInterval: Int = 16
+
+    private var groups: [GridGroup] {
+        buildGroups(showAds: adManager.shouldShowAds())
     }
-    
-    // Native ad placement configuration
-    private let adInterval: Int = 16 // Show an ad every 16 wallpapers
-    
+
     var body: some View {
         VStack(spacing: 0) {
             LazyVStack(spacing: 16) {
-                ForEach(Array(groupedContent.enumerated()), id: \.element.id) { _, group in
+                ForEach(groups) { group in
                     switch group {
                     case .wallpaperRow(let wallpapers):
                         HStack(spacing: interItemSpacing) {
@@ -45,11 +41,8 @@ struct PaginatedWallpaperGridWithAds: View {
                                     currentIndex: item.originalIndex
                                 )
                                 .onAppear {
-                                    // Only trigger load more when we're close to the end (5 items before)
                                     if item.originalIndex >= self.wallpapers.count - 5 && !isLoading && !hasReachedEnd {
-                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                            onLoadMore()
-                                        }
+                                        onLoadMore()
                                     }
                                 }
                             }
@@ -69,6 +62,16 @@ struct PaginatedWallpaperGridWithAds: View {
             }
             .padding(.horizontal, horizontalPadding)
             
+            // Bottom trigger — fires when the user scrolls to the end as a
+            // reliable fallback in case onAppear items missed the load-more call.
+            if !isLoading && !hasReachedEnd && !wallpapers.isEmpty {
+                Color.clear
+                    .frame(height: 1)
+                    .onAppear {
+                        onLoadMore()
+                    }
+            }
+
             // Loading indicator at bottom
             if isLoading && !wallpapers.isEmpty {
                 VStack(spacing: 8) {
@@ -112,7 +115,39 @@ struct PaginatedWallpaperGridWithAds: View {
             }
         }
     }
-    
+
+    private func buildGroups(showAds: Bool) -> [GridGroup] {
+        guard showAds else {
+            var groups: [GridGroup] = []
+            var currentRow: [WallpaperItem] = []
+            for (index, wallpaper) in wallpapers.enumerated() {
+                currentRow.append(WallpaperItem(wallpaper: wallpaper, originalIndex: index))
+                if currentRow.count == 2 || index == wallpapers.count - 1 {
+                    groups.append(.wallpaperRow(currentRow))
+                    currentRow = []
+                }
+            }
+            return groups
+        }
+
+        var groups: [GridGroup] = []
+        var currentRow: [WallpaperItem] = []
+        var adPosition = 0
+        for (index, wallpaper) in wallpapers.enumerated() {
+            currentRow.append(WallpaperItem(wallpaper: wallpaper, originalIndex: index))
+            let shouldInsertAd = (index + 1) % adInterval == 0 && index > 0
+            if currentRow.count == 2 || shouldInsertAd || index == wallpapers.count - 1 {
+                groups.append(.wallpaperRow(currentRow))
+                currentRow = []
+                if shouldInsertAd {
+                    groups.append(.nativeAd(adPosition: adPosition))
+                    adPosition += 1
+                }
+            }
+        }
+        return groups
+    }
+
     // MARK: - Helper Types and Properties
     
     private struct WallpaperItem {
@@ -123,59 +158,16 @@ struct PaginatedWallpaperGridWithAds: View {
     private enum GridGroup: Identifiable {
         case wallpaperRow([WallpaperItem])
         case nativeAd(adPosition: Int)
-        
+
+        // Use the first item's index for O(1) id — stable across renders
         var id: String {
             switch self {
             case .wallpaperRow(let items):
-                return "row_\(items.map { $0.wallpaper.id }.joined(separator: "_"))"
+                return "row_\(items.first?.originalIndex ?? 0)"
             case .nativeAd(let position):
                 return "native_ad_\(position)"
             }
         }
-    }
-    
-    private var groupedContent: [GridGroup] {
-        guard adManager.shouldShowAds() else {
-            // For premium users, group wallpapers into rows of 2
-            var groups: [GridGroup] = []
-            var currentRow: [WallpaperItem] = []
-            
-            for (index, wallpaper) in wallpapers.enumerated() {
-                currentRow.append(WallpaperItem(wallpaper: wallpaper, originalIndex: index))
-                
-                if currentRow.count == 2 || index == wallpapers.count - 1 {
-                    groups.append(.wallpaperRow(currentRow))
-                    currentRow = []
-                }
-            }
-            
-            return groups
-        }
-        
-        var groups: [GridGroup] = []
-        var currentRow: [WallpaperItem] = []
-        var adPosition = 0
-        
-        for (index, wallpaper) in wallpapers.enumerated() {
-            currentRow.append(WallpaperItem(wallpaper: wallpaper, originalIndex: index))
-            
-            // Check if we should insert an ad after this wallpaper
-            let shouldInsertAd = (index + 1) % adInterval == 0 && index > 0
-            
-            // Complete row when we have 2 items or need to insert ad
-            if currentRow.count == 2 || shouldInsertAd || index == wallpapers.count - 1 {
-                groups.append(.wallpaperRow(currentRow))
-                currentRow = []
-                
-                // Insert ad if needed
-                if shouldInsertAd {
-                    groups.append(.nativeAd(adPosition: adPosition))
-                    adPosition += 1
-                }
-            }
-        }
-        
-        return groups
     }
 }
 
@@ -211,5 +203,6 @@ struct PaginatedWallpaperGridWithAds: View {
         hasReachedEnd: false,
         onLoadMore: {}
     )
+    .environmentObject(FavoritesManager.shared)
     .environment(\.appTheme, AppColors.light)
 }

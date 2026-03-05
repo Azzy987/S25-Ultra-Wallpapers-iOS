@@ -25,12 +25,10 @@ struct NativeAdView: View {
             if adManager.shouldShowAds() {
                 NativeAdRepresentable(height: height)
                     .frame(height: height)
-                    .background(theme.surfaceVariant)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(theme.onSurfaceVariant.opacity(0.2), lineWidth: 1)
-                    )
+                    .background(theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
             } else {
                 EmptyView()
             }
@@ -166,7 +164,7 @@ extension NativeAdUIView: NativeAdLoaderDelegate {
     
     private func createProgrammaticNativeAdView(nativeAd: NativeAd) {
         let container = UIView()
-        container.backgroundColor = UIColor.systemBackground
+        container.backgroundColor = .clear
 
         // Media view first (large, horizontal) - minimum 300x150 per Google recommendation
         let mediaView = MediaView()

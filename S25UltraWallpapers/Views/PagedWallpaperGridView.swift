@@ -4,7 +4,7 @@ struct PagedWallpaperGridView: View {
     @ObservedObject var paginator: FirestorePaginator
     @StateObject private var scrollViewHelper = ScrollViewHelper()
     @Environment(\.appTheme) private var theme
-    
+
     var body: some View {
         ScrollView {
             PaginatedWallpaperGridWithAds(
@@ -13,7 +13,13 @@ struct PagedWallpaperGridView: View {
                 hasReachedEnd: paginator.hasReachedEnd,
                 onLoadMore: { paginator.loadMoreWallpapers() }
             )
+            .environmentObject(FavoritesManager.shared)
             .padding(.vertical)
+        }
+        .onAppear {
+            if paginator.wallpapers.isEmpty && !paginator.isLoading {
+                paginator.loadInitialWallpapers()
+            }
         }
         .coordinateSpace(name: "scroll")
         .overlay(

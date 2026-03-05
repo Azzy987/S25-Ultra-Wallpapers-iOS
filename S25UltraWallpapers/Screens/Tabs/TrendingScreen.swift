@@ -17,7 +17,6 @@ enum TrendingSortOption: String, CaseIterable {
 struct TrendingScreen: View {
     @EnvironmentObject private var firebaseManager: FirebaseManager
     @EnvironmentObject private var trendingScreenState: TrendingScreenState
-    @EnvironmentObject private var tabManager: TabManager
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var paginator: FirestorePaginator
@@ -48,7 +47,7 @@ struct TrendingScreen: View {
     var body: some View {
         NavigationView {
         ZStack(alignment: .bottomTrailing) {
-            CustomRefreshView(showsIndicator: false) {
+            ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 16) {
                     // Loading indicator for wallpapers
                     if isLoadingWallpapers {
@@ -56,7 +55,7 @@ struct TrendingScreen: View {
                             ProgressView()
                                 .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
                                 .scaleEffect(1.2)
-                            
+
                             Text("Loading wallpapers...")
                                 .font(.subheadline)
                                 .foregroundColor(theme.onSurfaceVariant)
@@ -64,7 +63,7 @@ struct TrendingScreen: View {
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 40)
                     }
-                    
+
                     // Wallpapers Section
                     else if !paginator.wallpapers.isEmpty {
                         PaginatedWallpaperGridWithAds(
@@ -75,10 +74,27 @@ struct TrendingScreen: View {
                                 paginator.loadMoreWallpapers()
                             }
                         )
+                        .environmentObject(FavoritesManager.shared)
+                    } else if !paginator.isLoading && hasLoaded {
+                        VStack(spacing: 12) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: 40))
+                                .foregroundColor(theme.onSurfaceVariant)
+                            Text("Couldn't load wallpapers")
+                                .font(.subheadline)
+                                .foregroundColor(theme.onSurfaceVariant)
+                            Button("Try Again") {
+                                loadData()
+                            }
+                            .foregroundColor(theme.primary)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 60)
                     }
                 }
                 .padding(.vertical)
-            } onRefresh: {
+            }
+            .refreshable {
                 await refreshTrendingData()
             }
             
@@ -106,27 +122,17 @@ struct TrendingScreen: View {
             sortBottomSheet
         }
         .onAppear {
-            // Only mark as active and load if this is the active tab
-            if tabManager.isTabActive(2) {
-                isScreenActive = true
-                if !hasLoaded {
-                    loadData()
-                }
+            isScreenActive = true
+            if !hasLoaded {
+                loadData()
             }
         }
         .onDisappear {
             isScreenActive = false
         }
-        .onChange(of: tabManager.activeTab) { activeTab in
-            if activeTab == 2 && !isScreenActive {
-                // Tab became active
-                isScreenActive = true
-                if !hasLoaded {
-                    loadData()
-                }
-            } else if activeTab != 2 && isScreenActive {
-                // Tab became inactive
-                isScreenActive = false
+        .onChange(of: paginator.isLoading) { loading in
+            if !loading {
+                isLoadingWallpapers = false
             }
         }
         .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
@@ -185,42 +191,21 @@ struct TrendingScreen: View {
         if isScreenActive {
             isLoadingWallpapers = true
             paginator.loadInitialWallpapers()
-            
-            // Listen for loading completion
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                checkLoadingStatus()
-            }
         }
-        
+
         hasLoaded = true
-    }
-    
-    private func checkLoadingStatus() {
-        if !paginator.isLoading {
-            isLoadingWallpapers = false
-        } else {
-            // Check again in 0.5 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                checkLoadingStatus()
-            }
-        }
     }
     
     private func applySortAndReload() {
         isLoadingWallpapers = true
-        
+
         // Create new query with selected sort
         let newQuery = FirebaseManager.shared.db.collection("TrendingWallpapers")
             .order(by: selectedSort.firebaseField, descending: true)
-        
+
         // Update paginator with new query
         paginator.updateQuery(newQuery)
         paginator.loadInitialWallpapers()
-        
-        // Monitor loading completion
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            checkLoadingStatus()
-        }
     }
     
     @MainActor

@@ -140,18 +140,6 @@ class AdCacheManager: NSObject, ObservableObject {
         print("🗑️ Removed ad from cache at position \(position)")
     }
     
-    // MARK: - Cache Statistics
-    
-    func getCacheStats() -> String {
-        return """
-        🔄 Ad Cache Statistics:
-        Cached Ads: \(nativeAdCache.count)
-        Loading Ads: \(loadingAdPositions.count)
-        Max Cache Size: \(maxCachedAds)
-        Cache Positions: \(Array(cachedAdPositions).sorted())
-        """
-    }
-    
     func clearCache() {
         nativeAdCache.removeAll()
         adLoadingStates.removeAll()
@@ -253,38 +241,24 @@ struct CachedNativeAdView: View {
                         nativeAd: cacheManager.getCachedAd(for: position)!
                     )
                     .frame(height: max(height, 320))
+                    .background(theme.surface)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
+                    .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
                 } else {
-                    // Show loading placeholder with proper height
-                    VStack(spacing: 12) {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
-                            .scaleEffect(0.9)
-                        
-                        Text("Loading Ad...")
-                            .font(.caption)
-                            .foregroundColor(theme.onSurfaceVariant)
-                    }
-                    .frame(height: max(height, 320))
-                    .frame(maxWidth: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(theme.surfaceVariant.opacity(0.3))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12)
-                                    .stroke(theme.primary.opacity(0.2), lineWidth: 1)
-                            )
-                    )
-                    .onAppear {
-                        // Trigger ad loading when this position becomes visible
-                        if let rootVC = findRootViewController() {
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                cacheManager.preloadAdsAround(
-                                    position: position,
-                                    rootViewController: rootVC
-                                )
+                    // No placeholder — just trigger preloading silently, show nothing until ready
+                    Color.clear
+                        .frame(height: 0)
+                        .onAppear {
+                            if let rootVC = findRootViewController() {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                    cacheManager.preloadAdsAround(
+                                        position: position,
+                                        rootViewController: rootVC
+                                    )
+                                }
                             }
                         }
-                    }
                 }
             } else {
                 // Premium users or ad-free mode - no ad space
@@ -341,14 +315,16 @@ class CachedNativeAdUIView: UIView {
         // Defer setup until we have real bounds so Google SDK sees a non-zero size
         if !didSetup && bounds.width > 0 && bounds.height > 0 {
             didSetup = true
-            setupAdView()
+            // Dispatch to next run loop tick to avoid blocking scroll/touch during layout
+            DispatchQueue.main.async { [weak self] in
+                self?.setupAdView()
+            }
         }
     }
 
     private func setupAdView() {
         let container = UIView()
-        container.backgroundColor = UIColor.systemBackground
-        container.layer.cornerRadius = 12
+        container.backgroundColor = .clear
         container.clipsToBounds = true
 
         // Media view first (large, horizontal) - minimum 300x150 per Google recommendation

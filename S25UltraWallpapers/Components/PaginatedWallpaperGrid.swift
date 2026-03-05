@@ -6,6 +6,7 @@ struct PaginatedWallpaperGrid: View {
     let hasReachedEnd: Bool
     let onLoadMore: () -> Void
     @Environment(\.appTheme) private var theme
+    @EnvironmentObject private var favoritesManager: FavoritesManager
     
     private let horizontalPadding: CGFloat = 6 // 6px on each side = 12px total (further reduced)
     private let interItemSpacing: CGFloat = 8 // Space between cards (further reduced)

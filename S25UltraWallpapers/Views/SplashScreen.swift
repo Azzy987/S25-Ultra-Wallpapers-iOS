@@ -155,19 +155,21 @@ struct SplashScreen: View {
     
     private func monitorAppInitialization() {
         let startTime = Date()
-        
+        let minimumDisplayTime = 2.5
+        let maximumWaitTime = 8.0 // Never wait longer than 8 seconds
+
         // Check Firebase initialization status periodically
         Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
-            // Check if Firebase is ready and data is loaded
             let firebaseManager = FirebaseManager.shared
-            if firebaseManager.isInitialized && !firebaseManager.wallpapers.isEmpty {
+            let elapsedTime = Date().timeIntervalSince(startTime)
+            let isReady = firebaseManager.isInitialized
+            let timedOut = elapsedTime >= maximumWaitTime
+
+            if isReady || timedOut {
                 timer.invalidate()
-                
-                // Ensure minimum display time of 2.5 seconds for better UX
-                let minimumDisplayTime = 2.5
-                let elapsedTime = Date().timeIntervalSince(startTime)
+
                 let remainingTime = max(0, minimumDisplayTime - elapsedTime)
-                
+
                 DispatchQueue.main.asyncAfter(deadline: .now() + remainingTime) {
                     withAnimation(.easeOut(duration: 0.5)) {
                         onSplashComplete()

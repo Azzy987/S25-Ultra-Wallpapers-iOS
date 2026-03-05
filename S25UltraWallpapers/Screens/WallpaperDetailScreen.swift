@@ -209,7 +209,7 @@ struct WallpaperDetailScreen: View {
                             editAction: editWallpaper,
                             reportAction: reportWallpaper
                         )
-                        .frame(maxWidth: geometry.size.width - 48)
+                        .frame(maxWidth: max(0, geometry.size.width - 48))
                         .padding(.bottom, 36)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
@@ -321,6 +321,11 @@ struct WallpaperDetailScreen: View {
 
                 // Track wallpaper view and show interstitial ad if needed
                 trackWallpaperView()
+
+                // If this is a stub wallpaper (from banner tap), fetch full data in background
+                if currentWallpaper.data.count <= 3 {
+                    fetchFullWallpaperDataIfNeeded()
+                }
             }
             .onDisappear {
                 // Hide any active toasts when leaving the detail screen
@@ -338,6 +343,40 @@ struct WallpaperDetailScreen: View {
                     isPresented: $showDownloadSuccess,
                     wallpaperName: currentWallpaper.wallpaperName
                 )
+                .transition(AnyTransition.opacity.animation(.easeInOut))
+                .onChange(of: showDownloadSuccess) { isShowing in
+                    // Show interstitial ad after dialog is dismissed
+                    if !isShowing {
+                        adManager.showInterstitialAd {}
+                    }
+                }
+            } else if isDownloading {
+                // Progress indicator during download
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    Text("Saving to Photos...")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .transition(AnyTransition.opacity.animation(.easeInOut))
+            } else if isSharing {
+                // Progress indicator during share preparation
+                HStack(spacing: 12) {
+                    ProgressView()
+                        .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    Text("Preparing to share...")
+                        .font(.subheadline.bold())
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
                 .transition(AnyTransition.opacity.animation(.easeInOut))
             }
         }
@@ -367,10 +406,37 @@ struct WallpaperDetailScreen: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .overlay(alignment: .bottom) {
+            if toastManager.showToast {
+                ToastView(
+                    message: toastManager.toastMessage,
+                    type: toastManager.toastType,
+                    isPresented: $toastManager.showToast
+                )
+                .padding(.bottom, 100)
+            }
+        }
     }
     
     private func loadMainImage() {
         isMainImageLoading = true
+
+        // Step 1: Show thumbnail immediately if it's already in cache (fast path)
+        let thumbnailUrl = currentWallpaper.thumbnail.isEmpty ? currentWallpaper.imageUrl : currentWallpaper.thumbnail
+        let thumbURL = URL(string: thumbnailUrl)
+
+        // Try multiple cache layers for thumbnail
+        let thumbImage: UIImage? = ImageCache.shared.getUIImage(for: thumbURL)
+            ?? (thumbURL.flatMap { URLCache.shared.cachedResponse(for: URLRequest(url: $0)) }.flatMap { UIImage(data: $0.data) })
+
+        if let thumbImage = thumbImage {
+            // Show thumbnail immediately while full-res loads in background
+            self.mainImage = thumbImage
+            self.isMainImageLoaded = true
+            self.isMainImageLoading = false
+        }
+
+        // Step 2: Load full-res image (cached or download)
         loadCachedImage(from: currentWallpaper.imageUrl) { image in
             DispatchQueue.main.async {
                 if let image = image {
@@ -430,85 +496,80 @@ struct WallpaperDetailScreen: View {
     private func shareWallpaper() {
         toastManager.showInfoToast(message: "Preparing to share...")
         isSharing = true
-        performShare()
+        // Use already-loaded mainImage if available to avoid re-downloading
+        if let alreadyLoaded = mainImage {
+            performShareWithImage(alreadyLoaded)
+        } else {
+            loadCachedImage(from: currentWallpaper.imageUrl) { [self] cachedImage in
+                guard let image = cachedImage else {
+                    DispatchQueue.main.async {
+                        toastManager.showErrorToast(message: "Failed to load image")
+                        isSharing = false
+                    }
+                    return
+                }
+                performShareWithImage(image)
+            }
+        }
     }
-    
-    private func performShare() {
-        loadCachedImage(from: currentWallpaper.imageUrl) { [self] cachedImage in
-            guard let image = cachedImage else {
+
+    private func performShareWithImage(_ image: UIImage) {
+        // Write JPEG to a temp file off the main thread to avoid blocking UI
+        DispatchQueue.global(qos: .userInitiated).async {
+            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            let fileName = "\(self.currentWallpaper.wallpaperName)_share.jpg"
+            let fileURL = cachesDirectory.appendingPathComponent(fileName)
+
+            guard let imageData = image.jpegData(compressionQuality: 0.85) else {
                 DispatchQueue.main.async {
-                    toastManager.showErrorToast(message: "Failed to load image")
-                    isSharing = false
+                    self.toastManager.showErrorToast(message: "Failed to prepare image for sharing")
+                    self.isSharing = false
                 }
                 return
             }
-            
-            // Create a temporary file in the caches directory
-            let cachesDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            let fileName = "\(currentWallpaper.wallpaperName)_\(UUID().uuidString).jpg"
-            let fileURL = cachesDirectory.appendingPathComponent(fileName)
-            
-            do {
-                // Convert image to data and write to file
-                if let imageData = image.jpegData(compressionQuality: 0.8) {
-                    try imageData.write(to: fileURL)
-                    
-                    DispatchQueue.main.async {
-                        // Create activity items - use fileURL only to avoid duplicate save options
-                        let activityItems: [Any] = [fileURL]
-                        
-                        let activityVC = UIActivityViewController(
-                            activityItems: activityItems,
-                            applicationActivities: nil
-                        )
-                        
-                        // Configure activity view controller
-                        activityVC.excludedActivityTypes = [.assignToContact, .addToReadingList]
-                        activityVC.completionWithItemsHandler = { _, completed, _, _ in
-                            // Clean up temporary file
-                            try? FileManager.default.removeItem(at: fileURL)
 
-                            DispatchQueue.main.async {
-                                isSharing = false
-                                // Show interstitial ad after sharing is done (for non-premium users)
-                                self.adManager.showInterstitialAd {}
-                            }
-                        }
-                        
-                        // Present the activity view controller
-                        if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-                           let window = windowScene.windows.first,
-                           let rootVC = window.rootViewController {
-                            
-                            // Find the topmost presented view controller
-                            var topVC = rootVC
-                            while let presentedVC = topVC.presentedViewController {
-                                topVC = presentedVC
-                            }
-                            
-                            // Configure popover for iPad
-                            if let popover = activityVC.popoverPresentationController {
-                                popover.sourceView = window
-                                popover.sourceRect = CGRect(
-                                    x: window.bounds.midX,
-                                    y: window.bounds.midY,
-                                    width: 0,
-                                    height: 0
-                                )
-                            }
-                            
-                            topVC.present(activityVC, animated: true)
-                        } else {
-                            isSharing = false
-                            toastManager.showErrorToast(message: "Couldn't present share sheet")
-                        }
-                    }
-                }
+            do {
+                try imageData.write(to: fileURL)
             } catch {
                 DispatchQueue.main.async {
-                    toastManager.showErrorToast(message: "Failed to prepare image for sharing")
-                    isSharing = false
+                    self.toastManager.showErrorToast(message: "Failed to prepare image for sharing")
+                    self.isSharing = false
                 }
+                return
+            }
+
+            DispatchQueue.main.async {
+                let activityVC = UIActivityViewController(
+                    activityItems: [fileURL],
+                    applicationActivities: nil
+                )
+                activityVC.excludedActivityTypes = [.assignToContact, .addToReadingList]
+                activityVC.completionWithItemsHandler = { _, _, _, _ in
+                    try? FileManager.default.removeItem(at: fileURL)
+                    DispatchQueue.main.async {
+                        self.isSharing = false
+                        self.adManager.showInterstitialAd {}
+                    }
+                }
+
+                guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                      let window = windowScene.windows.first,
+                      let rootVC = window.rootViewController else {
+                    self.isSharing = false
+                    return
+                }
+
+                var topVC = rootVC
+                while let presentedVC = topVC.presentedViewController {
+                    topVC = presentedVC
+                }
+
+                if let popover = activityVC.popoverPresentationController {
+                    popover.sourceView = window
+                    popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
+                }
+
+                topVC.present(activityVC, animated: true)
             }
         }
     }
@@ -549,9 +610,18 @@ struct WallpaperDetailScreen: View {
             return
         }
 
+        // Check in-memory UIImage cache first (populated by CachedAsyncImage)
+        if let memCached = ImageCache.shared.getUIImage(for: url) {
+            completion(memCached)
+            return
+        }
+
+        // Check HTTP URL cache second
         let cache = URLCache.shared
         if let cachedResponse = cache.cachedResponse(for: URLRequest(url: url)),
            let image = UIImage(data: cachedResponse.data) {
+            // Populate in-memory cache for faster future access
+            ImageCache.shared.setUIImage(image, for: url)
             completion(image)
         } else {
             // If not cached, download the image
@@ -635,10 +705,6 @@ struct WallpaperDetailScreen: View {
                     self.isDownloading = false
                     if success {
                         self.showDownloadSuccess = true
-                        // Show interstitial ad after download dialog is shown (delayed so user sees success first)
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-                            self.adManager.showInterstitialAd {}
-                        }
                     } else {
                         self.toastManager.showErrorToast(message: "Failed to save wallpaper: \(error?.localizedDescription ?? "Unknown error")")
                     }
@@ -770,8 +836,26 @@ struct WallpaperDetailScreen: View {
         }
     }
     
+    // MARK: - Background Full Data Fetch
+
+    /// When navigating from a banner tap, we create a stub Wallpaper with only 3 fields
+    /// (imageUrl, thumbnail, wallpaperName) to allow instant navigation. This function
+    /// fetches the complete wallpaper data in the background and updates currentWallpaper.
+    private func fetchFullWallpaperDataIfNeeded() {
+        let wallpaperId = currentWallpaper.id
+        Task {
+            if let full = try? await FirebaseManager.shared.fetchWallpaperById(wallpaperId, collection: "Samsung") {
+                await MainActor.run { currentWallpaper = full }
+                return
+            }
+            if let full = try? await FirebaseManager.shared.fetchWallpaperById(wallpaperId, collection: "TrendingWallpapers") {
+                await MainActor.run { currentWallpaper = full }
+            }
+        }
+    }
+
     // MARK: - View and Ad Tracking
-    
+
     private func trackWallpaperView() {
         viewCountManager.recordWallpaperView()
         

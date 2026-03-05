@@ -213,7 +213,7 @@ class ScrollViewModel: NSObject,ObservableObject,UIGestureRecognizerDelegate{
     @objc
     func onGestureChange(gesture: UIPanGestureRecognizer){
         if gesture.state == .cancelled || gesture.state == .ended{
-            print("User Released Touch")
+            // User released touch
             // MARK: Your Max Duration Goes Here
             if !isRefreshing{
                 if scrollOffset > 150{

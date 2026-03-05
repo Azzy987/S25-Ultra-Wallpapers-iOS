@@ -25,14 +25,6 @@ struct MainTabView: View {
     @State private var dragOffset: CGFloat = 0
     @StateObject private var bannerDragState = BannerDragState.shared
     
-    // Calculate the display index for circular navigation
-    private func getDisplayIndex() -> Int {
-        // We have extra tabs at index -1 (Favorites) and index 4 (Home)
-        // The actual tabs are at indices 0, 1, 2, 3 but positioned at 1, 2, 3, 4 in the HStack
-        return selectedTab + 1
-    }
-
-    
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
@@ -106,97 +98,58 @@ struct MainTabView: View {
                         .background(theme.surfaceVariant)
                 }
                     
-                    // Content with circular tab navigation
+                    // Content — all tabs stay alive (opacity-based) to preserve scroll position
                     GeometryReader { geometry in
                         let screenWidth = geometry.size.width
-                        
-                        HStack(spacing: 0) {
-                            // Add extra tab at the beginning for circular navigation (Favorites)
-                            FavoritesScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(-1)
 
+                        ZStack {
                             HomeScreenContent()
                                 .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(0)
-
+                                .opacity(selectedTab == 0 ? 1 : 0)
+                                .allowsHitTesting(selectedTab == 0)
                             CategoriesScreenContent()
                                 .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(1)
-
+                                .opacity(selectedTab == 1 ? 1 : 0)
+                                .allowsHitTesting(selectedTab == 1)
                             TrendingScreenContent()
                                 .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(2)
-
+                                .opacity(selectedTab == 2 ? 1 : 0)
+                                .allowsHitTesting(selectedTab == 2)
                             FavoritesScreenContent()
                                 .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(3)
-
-                            // Add extra tab at the end for circular navigation (Home)
-                            HomeScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
-                                .background(theme.background)
-                                .clipped()
-                                .tag(4)
+                                .opacity(selectedTab == 3 ? 1 : 0)
+                                .allowsHitTesting(selectedTab == 3)
                         }
-                        .offset(x: -CGFloat(getDisplayIndex()) * screenWidth + dragOffset)
                         .simultaneousGesture(
-                            DragGesture(minimumDistance: 30)
+                            DragGesture(minimumDistance: 50)
                                 .onChanged { value in
-                                    // Don't drag tabs while banner carousel is being swiped
                                     guard !bannerDragState.isDragging else { return }
-
                                     let horizontalAmount = abs(value.translation.width)
                                     let verticalAmount = abs(value.translation.height)
-
-                                    // Only track clearly horizontal drags (2x horizontal vs vertical)
-                                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 30 {
+                                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 50 {
                                         dragOffset = value.translation.width
                                     }
                                 }
                                 .onEnded { value in
-                                    // Don't switch tabs if banner was being dragged
                                     guard !bannerDragState.isDragging else {
                                         dragOffset = 0
                                         return
                                     }
-
                                     let horizontalAmount = abs(value.translation.width)
                                     let verticalAmount = abs(value.translation.height)
-
-                                    // Only process as tab navigation if clearly horizontal (2x ratio)
                                     if horizontalAmount > verticalAmount * 2 && horizontalAmount > 50 {
                                         let threshold = screenWidth / 3
                                         var newTab = selectedTab
-
-                                        if value.translation.width < -threshold { // Swiped left
-                                            newTab = selectedTab + 1
-                                            if newTab > 3 {
-                                                newTab = 0 // Circular: Favorites -> Home
-                                            }
-                                        } else if value.translation.width > threshold { // Swiped right
-                                            newTab = selectedTab - 1
-                                            if newTab < 0 {
-                                                newTab = 3 // Circular: Home -> Favorites
-                                            }
+                                        if value.translation.width < -threshold {
+                                            newTab = min(selectedTab + 1, 3)
+                                        } else if value.translation.width > threshold {
+                                            newTab = max(selectedTab - 1, 0)
                                         }
-
                                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                             selectedTab = newTab
                                             dragOffset = 0
                                         }
                                     } else {
-                                        // Snap back for non-qualifying drags
                                         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                             dragOffset = 0
                                         }
@@ -312,37 +265,33 @@ struct TabButtonGlassModifier: ViewModifier {
     }
 }
 
-// HomeScreen wrapper that can access the sort state and tab manager
+// HomeScreen wrapper
 struct HomeScreenContent: View {
     var body: some View {
         HomeScreen()
             .environmentObject(HomeScreenState.shared)
-            .environmentObject(TabManager.shared)
     }
 }
 
-// CategoriesScreen wrapper with tab manager
+// CategoriesScreen wrapper
 struct CategoriesScreenContent: View {
     var body: some View {
         CategoriesScreen()
-            .environmentObject(TabManager.shared)
     }
 }
 
-// TrendingScreen wrapper that can access the sort state and tab manager
+// TrendingScreen wrapper
 struct TrendingScreenContent: View {
     var body: some View {
         TrendingScreen()
             .environmentObject(TrendingScreenState.shared)
-            .environmentObject(TabManager.shared)
     }
 }
 
-// FavoritesScreen wrapper with tab manager
+// FavoritesScreen wrapper
 struct FavoritesScreenContent: View {
     var body: some View {
         FavoritesScreen()
-            .environmentObject(TabManager.shared)
     }
 }
 

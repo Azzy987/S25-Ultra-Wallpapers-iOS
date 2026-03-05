@@ -92,10 +92,11 @@ class FirestorePaginator: ObservableObject {
                         return
                     }
                     
-                    self.wallpapers = documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
+                    let loaded = documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
+                    self.wallpapers = loaded
                     self.lastDocument = documents.last
                     self.hasMoreData = documents.count == self.pageSize
-                    
+
                     if !self.hasMoreData {
                         self.hasReachedEnd = true
                     }
@@ -105,12 +106,7 @@ class FirestorePaginator: ObservableObject {
     
     func loadMoreWallpapers() {
         guard !isLoading, hasMoreData, let lastDocument = lastDocument else { return }
-        
-        // Rate limiting to prevent too frequent requests
-        let now = Date()
-        guard now.timeIntervalSince(lastRequestTime) >= minRequestInterval else { return }
-        lastRequestTime = now
-        
+
         isLoading = true
         errorMessage = nil
         

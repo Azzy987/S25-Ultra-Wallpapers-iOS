@@ -10,15 +10,14 @@ class FirebaseManager: ObservableObject {
     @Published var banners: [Banner] = []
     @Published var categories: [Category] = []
     @Published var trendingWallpapers: [Wallpaper] = []
-    @Published private(set) var tags: [Tag] = []
-    @Published private(set) var colors: [ColorItem] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isInitialized = false
     
     private init() {
         // Configure Firestore settings BEFORE accessing the instance
+        // Use persistent disk cache so wallpapers load instantly on subsequent launches
         let settings = FirestoreSettings()
-        settings.cacheSettings = MemoryCacheSettings(garbageCollectorSettings: MemoryLRUGCSettings())
+        settings.cacheSettings = PersistentCacheSettings(sizeBytes: 50 * 1024 * 1024 as NSNumber) // 50MB disk cache
         settings.isSSLEnabled = true
         Firestore.firestore().settings = settings
 
@@ -38,34 +37,24 @@ class FirebaseManager: ObservableObject {
     func fetchHomeData() {
         guard wallpapers.isEmpty else { return }
         isLoading = true
-        
+
         let group = DispatchGroup()
-        
+
         group.enter()
         fetchWallpapers {
             group.leave()
         }
-        
+
         group.enter()
         fetchBanners {
             group.leave()
         }
-        
+
         group.enter()
         fetchTrendingWallpapers {
             group.leave()
         }
-        
-        group.enter()
-        fetchTags {
-            group.leave()
-        }
-        
-        group.enter()
-        fetchColors {
-            group.leave()
-        }
-        
+
         group.notify(queue: .main) {
             self.isLoading = false
             self.isInitialized = true
@@ -78,14 +67,15 @@ class FirebaseManager: ObservableObject {
             .getDocuments { snapshot, error in
                 if let error = error {
                     print("❌ Error fetching wallpapers: \(error)")
+                    DispatchQueue.main.async { completion() }
                     return
                 }
-                
+
                 DispatchQueue.main.async {
                     self.wallpapers = snapshot?.documents.map { doc in
                         Wallpaper(id: doc.documentID, data: doc.data())
                     } ?? []
-                    
+
                     completion()
                 }
             }
@@ -98,14 +88,15 @@ class FirebaseManager: ObservableObject {
             .getDocuments { snapshot, error in
                 if let error = error {
                     print("❌ Error fetching banners: \(error)")
+                    DispatchQueue.main.async { completion() }
                     return
                 }
-                
+
                 DispatchQueue.main.async {
                     self.banners = snapshot?.documents.map { doc in
                         return Banner(id: doc.documentID, data: doc.data())
                     } ?? []
-                    
+
                     completion()
                 }
             }
@@ -133,9 +124,10 @@ class FirebaseManager: ObservableObject {
             .getDocuments { snapshot, error in
                 if let error = error {
                     print("Error fetching trending wallpapers: \(error)")
+                    DispatchQueue.main.async { completion() }
                     return
                 }
-                
+
                 DispatchQueue.main.async {
                     self.trendingWallpapers = snapshot?.documents.map { doc in
                         Wallpaper(id: doc.documentID, data: doc.data())
@@ -145,80 +137,21 @@ class FirebaseManager: ObservableObject {
             }
     }
     
-    func fetchTags(completion: @escaping () -> Void = {}) {
-        let db = Firestore.firestore()
-        db.collection("Samsung").getDocuments { [weak self] snapshot, error in
-            guard let documents = snapshot?.documents else {
-                print("Error fetching documents: \(error?.localizedDescription ?? "Unknown error")")
-                return
-            }
-            
-            var tagCount: [String: Int] = [:]
-            
-            // Count occurrences of each tag
-            for document in documents {
-                if let tags = document.data()["tags"] as? [String] {
-                    for tag in tags {
-                        tagCount[tag, default: 0] += 1
-                    }
-                }
-            }
-            
-            // Convert to Tag objects and sort by count
-            let sortedTags = tagCount.map { Tag(name: $0.key, count: $0.value) }
-                .sorted { $0.count > $1.count }
-            
-            DispatchQueue.main.async {
-                self?.tags = sortedTags
-                completion()
-            }
-        }
-    }
-    
-    // Add this function to cache colors
-    private var cachedColors: [String] = []
-    
-    func getAllColors() -> [String] {
-        if cachedColors.isEmpty {
-            cachedColors = Array(Set(wallpapers.flatMap { $0.colors })).sorted()
-        }
-        return cachedColors
-    }
-    
-    func fetchColors(completion: @escaping () -> Void = {}) {
-        db.collection("Samsung").getDocuments { [weak self] snapshot, error in
-            guard let documents = snapshot?.documents else {
-                print("Error fetching documents: \(error?.localizedDescription ?? "Unknown error")")
-                return
-            }
-            
-            var colorCount: [String: Int] = [:]
-            
-            // Count occurrences of each color
-            for document in documents {
-                if let colors = document.data()["colors"] as? [String] {
-                    for color in colors {
-                        colorCount[color, default: 0] += 1
-                    }
-                }
-            }
-            
-            // Convert to ColorItem objects and sort by count
-            let sortedColors = colorCount.map { ColorItem(name: $0.key, count: $0.value) }
-                .sorted { $0.count > $1.count }
-            
-            DispatchQueue.main.async {
-                self?.colors = sortedColors
-                completion()
-            }
-        }
-    }
-    
-    /// Fetches a specific wallpaper by ID from a given collection
-    /// Used for instant navigation from banner taps
+    /// Fetches a specific wallpaper by ID from a given collection.
+    /// Tries the local Firestore cache first for instant response, then falls back to server.
     func fetchWallpaperById(_ id: String, collection: String) async throws -> Wallpaper {
-        let document = try await db.collection(collection).document(id).getDocument()
-        
+        let ref = db.collection(collection).document(id)
+
+        // Try cache first — instant if the document was fetched before
+        if let cached = try? await ref.getDocument(source: .cache),
+           cached.exists,
+           let data = cached.data() {
+            return Wallpaper(id: cached.documentID, data: data)
+        }
+
+        // Cache miss — fetch from server
+        let document = try await ref.getDocument(source: .server)
+
         guard document.exists, let data = document.data() else {
             throw NSError(
                 domain: "FirebaseManager",
@@ -226,7 +159,7 @@ class FirebaseManager: ObservableObject {
                 userInfo: [NSLocalizedDescriptionKey: "Wallpaper not found in \(collection)"]
             )
         }
-        
+
         return Wallpaper(id: document.documentID, data: data)
     }
 

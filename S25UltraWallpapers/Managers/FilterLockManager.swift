@@ -129,15 +129,6 @@ class FilterLockManager: ObservableObject {
         print("🔓 Saved \(unlockedFilters.count) unlocked filters")
     }
     
-    // MARK: - Stats and Debug
-    
-    @MainActor 
-    func getFilterStats(for wallpaperId: String) -> String {
-        let unlocked = getUnlockedFilters(for: wallpaperId).count
-        let total = WallpaperFilter.allCases.count
-        return "🔓 Filters: \(unlocked)/\(total) unlocked for wallpaper \(wallpaperId)"
-    }
-    
     func clearAllUnlockedFilters() {
         unlockedFilters.removeAll()
         userDefaults.removeObject(forKey: unlockedFiltersKey)

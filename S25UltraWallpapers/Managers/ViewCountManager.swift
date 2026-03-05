@@ -78,19 +78,6 @@ class ViewCountManager: ObservableObject {
         userDefaults.set(totalWallpaperViews, forKey: totalViewsKey)
     }
     
-    // MARK: - Debug Methods
-    
-    func getViewingStats() -> String {
-        return """
-        📊 Viewing Statistics:
-        Total Views: \(totalWallpaperViews)
-        Session Views: \(currentSessionViews)
-        Swipe Count: \(swipeCount)
-        Next ad at view: \(((currentSessionViews / viewsBeforeAd) + 1) * viewsBeforeAd)
-        Next ad at swipe: \(((swipeCount / swipesBeforeAd) + 1) * swipesBeforeAd)
-        """
-    }
-    
     func resetAllCounts() {
         totalWallpaperViews = 0
         currentSessionViews = 0

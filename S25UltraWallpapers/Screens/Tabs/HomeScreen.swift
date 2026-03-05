@@ -20,7 +20,6 @@ enum HomeSortOption: String, CaseIterable {
 struct HomeScreen: View {
     @EnvironmentObject private var firebaseManager: FirebaseManager
     @StateObject private var homeScreenState = HomeScreenState.shared
-    @EnvironmentObject private var tabManager: TabManager
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
     @State private var cards: [CarouselCard] = []
@@ -57,12 +56,13 @@ struct HomeScreen: View {
     var body: some View {
         NavigationView {
         ZStack(alignment: .bottomTrailing) {
-            CustomRefreshView(showsIndicator: false) {
+            ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(spacing: 8) {
                     bannerSection
                     wallpaperSection
                 }
-            } onRefresh: {
+            }
+            .refreshable {
                 await refreshHomeData()
             }
                 
@@ -79,36 +79,24 @@ struct HomeScreen: View {
             }
         }
         .onAppear {
-            // Only mark as active and load if this is the active tab
-            if tabManager.isTabActive(0) {
-                isScreenActive = true
-                if !hasLoaded {
-                    loadData()
-                }
-                startAutoScroll()
+            isScreenActive = true
+            if !hasLoaded {
+                loadData()
             }
+            startAutoScroll()
         }
         .onDisappear {
             isScreenActive = false
             stopAutoScroll()
         }
-        .onChange(of: tabManager.activeTab) { activeTab in
-            if activeTab == 0 && !isScreenActive {
-                // Tab became active
-                isScreenActive = true
-                if !hasLoaded {
-                    loadData()
-                }
-                startAutoScroll()
-            } else if activeTab != 0 && isScreenActive {
-                // Tab became inactive
-                isScreenActive = false
-                stopAutoScroll()
+        .onChange(of: paginator.isLoading) { loading in
+            if !loading {
+                isLoadingWallpapers = false
             }
         }
         .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
     }
-    
+
     @ViewBuilder
     private var bannerSection: some View {
         if !cards.isEmpty {
@@ -330,19 +318,6 @@ struct HomeScreen: View {
             }
             .allowsHitTesting(false)
             
-            // Test overlay (top-left) 
-            VStack {
-                HStack {
-                    Text("TEST: \(card.name)")
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                        .padding(4)
-                        .background(Color.yellow.opacity(0.9))
-                    Spacer()
-                }
-                Spacer()
-            }
-            .allowsHitTesting(false)
         }
     }
     
@@ -411,6 +386,7 @@ struct HomeScreen: View {
                                         paginator.loadMoreWallpapers()
                 }
                                 )
+                                .environmentObject(FavoritesManager.shared)
                                 .frame(maxWidth: .infinity)
         }
     }
@@ -520,16 +496,11 @@ struct HomeScreen: View {
         if isScreenActive {
             isLoadingWallpapers = true
             paginator.loadInitialWallpapers()
-            
-            // Listen for loading completion
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                checkLoadingStatus()
-            }
         }
-        
+
         hasLoaded = true
     }
-    
+
     private func preloadBannerWallpapers() {
         // Preload wallpaper data for all banners in background for instant access
         for card in cards {
@@ -546,17 +517,6 @@ struct HomeScreen: View {
                 }
             }
         }
-    }
-    
-    private func checkLoadingStatus() {
-        if !paginator.isLoading {
-            isLoadingWallpapers = false
-        } else {
-            // Check again in 0.5 seconds
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                checkLoadingStatus()
-    }
-}
     }
     
     @MainActor
@@ -599,19 +559,14 @@ struct HomeScreen: View {
     
     private func applySortAndReload() {
         isLoadingWallpapers = true
-        
+
         // Create new query with selected sort
         let newQuery = FirebaseManager.shared.db.collection("Samsung")
             .order(by: selectedSort.firebaseField, descending: true)
-        
+
         // Update paginator with new query
         paginator.updateQuery(newQuery)
         paginator.loadInitialWallpapers()
-        
-        // Monitor loading completion
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            checkLoadingStatus()
-        }
     }
     
     

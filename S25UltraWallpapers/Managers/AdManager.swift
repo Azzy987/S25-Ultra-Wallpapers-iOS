@@ -50,19 +50,22 @@ class AdManager: NSObject, ObservableObject {
     // MARK: - Initialization
     
     private func initializeGoogleMobileAds() {
-        // Initialize according to the official documentation
-        MobileAds.shared.start(completionHandler: { [weak self] _ in
-            DispatchQueue.main.async {
-                print("✅ Google Mobile Ads initialized")
-                self?.loadInterstitialAd()
-                self?.loadRewardAd()
-            }
-        })
-        
         // Configure test devices for development
         #if DEBUG
         MobileAds.shared.requestConfiguration.testDeviceIdentifiers = ["SIMULATOR"]
         #endif
+
+        // Initialize according to the official documentation
+        MobileAds.shared.start(completionHandler: { [weak self] _ in
+            DispatchQueue.main.async {
+                print("✅ Google Mobile Ads initialized")
+                // Defer ad preloading to avoid blocking app startup with WebView processes
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                    self?.loadInterstitialAd()
+                    self?.loadRewardAd()
+                }
+            }
+        })
     }
     
     // MARK: - Interstitial Ads
