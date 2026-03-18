@@ -6,34 +6,41 @@ struct CategoriesScreen: View {
     @StateObject private var themeManager = ThemeManager.shared
     @State private var hasLoaded = false
     @State private var selectedCategory: Category?
-    
+
     var filteredCategories: [Category] {
         firebaseManager.categories.filter { category in
-            // Show all "main" categories and only "Samsung" from "brand" categories
             category.categoryType == "main" || (category.categoryType == "brand" && category.name == "Samsung")
         }
     }
-    
+
     var body: some View {
         NavigationView {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 16) {
                     ForEach(filteredCategories) { category in
-                        CategoryCard(category: category)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedCategory = category
-                            }
+                        Button {
+                            selectedCategory = category
+                        } label: {
+                            CategoryCard(category: category)
+                        }
+                        .buttonStyle(CategoryCardButtonStyle())
+                        .contentShape(RoundedRectangle(cornerRadius: 24))
                     }
                 }
-                .padding()
+                .padding(.horizontal)
+                .padding(.top)
+                .padding(.bottom, 100) // clear floating tab bar
+                .background(
+                    ScrollOffsetObserver { offset in
+                        TabBarVisibilityManager.shared.updateScrollOffset(offset)
+                    }
+                )
             }
             .refreshable {
                 await refreshCategoriesData()
             }
             .navigationBarHidden(true)
             .background(theme.background.ignoresSafeArea())
-
         }
         .navigationViewStyle(.stack)
         .fullScreenCover(item: $selectedCategory) { category in
@@ -46,14 +53,20 @@ struct CategoriesScreen: View {
             }
         }
     }
-    
+
     @MainActor
     private func refreshCategoriesData() async {
         firebaseManager.fetchCategories()
-        
-        // Wait a bit for the data to load
-        try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconds
+        try? await Task.sleep(nanoseconds: 500_000_000)
     }
 }
 
-
+// Press feedback: subtle opacity change instead of scale to avoid
+// "pressed" feeling during tab swipe gestures.
+private struct CategoryCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+    }
+}

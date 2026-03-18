@@ -21,6 +21,7 @@ struct TrendingScreen: View {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var paginator: FirestorePaginator
     @StateObject private var scrollViewHelper = ScrollViewHelper()
+    @StateObject private var scrollToTopNotifier = ScrollToTopNotifier.shared
     @State private var showToast = false
     @State private var toastMessage = ""
     @State private var toastType: ToastView.ToastType = .info
@@ -30,6 +31,10 @@ struct TrendingScreen: View {
     @State private var isLoadingWallpapers = false
     @State private var isScreenActive = false
     @State private var hasLoaded = false
+
+    // Task handle for cancellation on navigation away
+    @State private var loadTask: Task<Void, Never>?
+    @State private var diskCacheSaved = false
     
     init() {
         // Load saved sort preference
@@ -47,64 +52,72 @@ struct TrendingScreen: View {
     var body: some View {
         NavigationView {
         ZStack(alignment: .bottomTrailing) {
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(spacing: 16) {
-                    // Loading indicator for wallpapers
-                    if isLoadingWallpapers {
-                        VStack(spacing: 16) {
-                            ProgressView()
-                                .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
-                                .scaleEffect(1.2)
+            ScrollViewReader { scrollProxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 16) {
+                        Color.clear.frame(height: 0).id("trendingTop")
+                        // Loading indicator for wallpapers
+                        if isLoadingWallpapers {
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+                                    .scaleEffect(1.2)
 
-                            Text("Loading wallpapers...")
-                                .font(.subheadline)
-                                .foregroundColor(theme.onSurfaceVariant)
+                                Text("Loading wallpapers...")
+                                    .font(.subheadline)
+                                    .foregroundColor(theme.onSurfaceVariant)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 40)
+
+                        // Wallpapers Section
+                        else if !paginator.wallpapers.isEmpty {
+                            PaginatedWallpaperGridWithAds(
+                                wallpapers: paginator.wallpapers,
+                                isLoading: paginator.isLoading,
+                                hasReachedEnd: paginator.hasReachedEnd,
+                                onLoadMore: {
+                                    paginator.loadMoreWallpapers()
+                                }
+                            )
+                            .environmentObject(FavoritesManager.shared)
+                        } else if !paginator.isLoading && hasLoaded {
+                            VStack(spacing: 12) {
+                                Image(systemName: "wifi.slash")
+                                    .font(.system(size: 40))
+                                    .foregroundColor(theme.onSurfaceVariant)
+                                Text("Couldn't load wallpapers")
+                                    .font(.subheadline)
+                                    .foregroundColor(theme.onSurfaceVariant)
+                                Button("Try Again") {
+                                    loadData()
+                                }
+                                .foregroundColor(theme.primary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 60)
+                        }
                     }
-
-                    // Wallpapers Section
-                    else if !paginator.wallpapers.isEmpty {
-                        PaginatedWallpaperGridWithAds(
-                            wallpapers: paginator.wallpapers,
-                            isLoading: paginator.isLoading,
-                            hasReachedEnd: paginator.hasReachedEnd,
-                            onLoadMore: {
-                                paginator.loadMoreWallpapers()
+                    .padding(.vertical)
+                    .padding(.bottom, 100) // clear floating tab bar
+                    .background(
+                        ScrollOffsetObserver { offset in
+                            TabBarVisibilityManager.shared.updateScrollOffset(offset)
+                            withAnimation {
+                                scrollViewHelper.showScrollToTop = offset < -500
                             }
-                        )
-                        .environmentObject(FavoritesManager.shared)
-                    } else if !paginator.isLoading && hasLoaded {
-                        VStack(spacing: 12) {
-                            Image(systemName: "wifi.slash")
-                                .font(.system(size: 40))
-                                .foregroundColor(theme.onSurfaceVariant)
-                            Text("Couldn't load wallpapers")
-                                .font(.subheadline)
-                                .foregroundColor(theme.onSurfaceVariant)
-                            Button("Try Again") {
-                                loadData()
-                            }
-                            .foregroundColor(theme.primary)
                         }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 60)
+                    )
+                }
+                .refreshable {
+                    await refreshTrendingData()
+                }
+                .onChange(of: scrollToTopNotifier.trigger) { _ in
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        scrollProxy.scrollTo("trendingTop", anchor: .top)
                     }
                 }
-                .padding(.vertical)
-            }
-            .refreshable {
-                await refreshTrendingData()
-            }
-            
-            // Scroll to top button
-            if scrollViewHelper.showScrollToTop {
-                ScrollToTopButton {
-                    scrollViewHelper.shouldScrollToTop = true
-                }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
             }
             
             // Toast
@@ -129,13 +142,22 @@ struct TrendingScreen: View {
         }
         .onDisappear {
             isScreenActive = false
+            // Cancel in-flight tasks when navigating away
+            loadTask?.cancel()
+            loadTask = nil
         }
         .onChange(of: paginator.isLoading) { loading in
             if !loading {
                 isLoadingWallpapers = false
             }
         }
-        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
+        .onChange(of: paginator.wallpapers.count) { count in
+            // Save trending wallpapers to disk cache once on first load
+            guard !diskCacheSaved, count > 0 else { return }
+            diskCacheSaved = true
+            WallpaperDiskCache.shared.save(paginator.wallpapers, forKey: WallpaperDiskCache.trendingKey)
+        }
+        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : (themeManager.themeMode == .light ? .light : nil))
     }
     
     private var sortBottomSheet: some View {
@@ -187,17 +209,20 @@ struct TrendingScreen: View {
     }
     
     private func loadData() {
-        // Load wallpapers only if screen is active
-        if isScreenActive {
-            isLoadingWallpapers = true
+        hasLoaded = true
+        guard isScreenActive else { return }
+        isLoadingWallpapers = true
+        loadTask?.cancel()
+        loadTask = Task { @MainActor in
             paginator.loadInitialWallpapers()
         }
-
-        hasLoaded = true
     }
     
     private func applySortAndReload() {
         isLoadingWallpapers = true
+
+        // Scroll to top so when new results arrive the user sees them from the start
+        scrollToTopNotifier.scrollToTop()
 
         // Create new query with selected sort
         let newQuery = FirebaseManager.shared.db.collection("TrendingWallpapers")

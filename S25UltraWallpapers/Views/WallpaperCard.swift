@@ -8,8 +8,11 @@ struct WallpaperCard: View {
     @Environment(\.appTheme) private var theme
     @State private var showDetail = false
     // Guards against the card tap firing when the favorite button was tapped.
-    // Set to true on favorite tap; the card's action checks and resets it.
     @State private var favoriteJustTapped = false
+    // Fade + slide-up entrance when the card first scrolls into view.
+    @State private var appeared = false
+    // Heart icon bounce scale on favorite toggle.
+    @State private var heartScale: CGFloat = 1.0
 
     init(wallpaper: Wallpaper, wallpapers: [Wallpaper]? = nil, currentIndex: Int? = nil) {
         self.wallpaper = wallpaper
@@ -28,35 +31,37 @@ struct WallpaperCard: View {
     private var imageHeight: CGFloat { 240 }
 
     var body: some View {
-        // Per SwiftUI guidelines for interactive items inside LazyVStack:
-        // Use a single outer Button for the card tap, and .simultaneousGesture
-        // for the inner favorite action. simultaneousGesture fires alongside the
-        // outer button gesture, and we use a flag to suppress the card action.
         Button {
             if favoriteJustTapped {
-                print("🚫 [WallpaperCard] Card tap BLOCKED — favorite was tapped | wallpaper: \(wallpaper.wallpaperName) | id: \(wallpaper.id)")
                 favoriteJustTapped = false
                 return
             }
-            print("✅ [WallpaperCard] Card tapped — opening detail | wallpaper: \(wallpaper.wallpaperName) | id: \(wallpaper.id)")
             showDetail = true
         } label: {
             cardContent
         }
+        // Press scale: card shrinks slightly to give physical press feedback.
         .buttonStyle(CardButtonStyle())
-        // Explicitly constrain the hit area to the card's visible rounded rect.
-        // Without this, the Button's hit region can bleed into adjacent cards in
-        // the HStack, causing the neighboring card to open when you tap this card's
-        // favorite area. contentShape clips hit-testing to exactly the visible bounds.
         .contentShape(RoundedRectangle(cornerRadius: 24))
         .frame(width: itemWidth)
-        .onChange(of: showDetail) { val in
-            if val {
-                print("🔔 [WallpaperCard] showDetail became TRUE | wallpaper: \(wallpaper.wallpaperName) | id: \(wallpaper.id) | favoriteJustTapped was: \(favoriteJustTapped)")
+        // Entrance animation: fade in + slide up when the card scrolls into view.
+        .opacity(appeared ? 1.0 : 0.0)
+        .offset(y: appeared ? 0 : 20)
+        .onAppear {
+            guard !appeared else { return }
+            withAnimation(.easeOut(duration: 0.3).delay(0.05)) {
+                appeared = true
+            }
+        }
+        // Heart settle: after bouncing to 1.3, spring back to 1.0 automatically.
+        .onChange(of: heartScale) { val in
+            if val == 1.3 {
+                withAnimation(.spring(response: 0.25, dampingFraction: 0.6).delay(0.12)) {
+                    heartScale = 1.0
+                }
             }
         }
         .fullScreenCover(isPresented: $showDetail) {
-            let _ = print("🖼️ [WallpaperCard] Detail screen presented | wallpaper: \(wallpaper.wallpaperName) | id: \(wallpaper.id) | index: \(currentIndex ?? -1)")
             WallpaperDetailScreen(
                 wallpaper: wallpaper,
                 isPresented: $showDetail,
@@ -66,8 +71,6 @@ struct WallpaperCard: View {
         }
     }
 
-    // Card visual content — the favorite button uses simultaneousGesture so it
-    // fires at the same time as the outer Button, letting the flag suppress it.
     private var cardContent: some View {
         ZStack(alignment: .bottomTrailing) {
             VStack(spacing: 0) {
@@ -131,8 +134,13 @@ struct WallpaperCard: View {
                 .contentShape(Rectangle())
                 .simultaneousGesture(
                     TapGesture().onEnded {
-                        print("❤️ [WallpaperCard] Favorite tapped | wallpaper: \(wallpaper.wallpaperName) | id: \(wallpaper.id) | isFavorite before: \(isFavorite)")
                         favoriteJustTapped = true
+                        // Haptic feedback
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        // Heart bounce: spring out to 1.3×, then .onChange settles it back
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.5)) {
+                            heartScale = 1.3
+                        }
                         toggleFavorite()
                     }
                 )
@@ -140,6 +148,7 @@ struct WallpaperCard: View {
                     Image(systemName: isFavorite ? "heart.fill" : "heart")
                         .font(.system(size: 18))
                         .foregroundColor(isFavorite ? .red : theme.onSurfaceVariant)
+                        .scaleEffect(heartScale)
                         .allowsHitTesting(false)
                 )
         }
@@ -155,9 +164,13 @@ struct WallpaperCard: View {
     }
 }
 
-// Removes the default Button tap highlight while keeping the gesture.
+// Press feedback: subtle opacity change instead of scale to avoid
+// "pressed" feeling during tab swipe gestures. Scale effects are
+// too visible when a DragGesture on the parent triggers simultaneously.
 private struct CardButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }

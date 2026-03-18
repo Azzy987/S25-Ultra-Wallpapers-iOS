@@ -1,19 +1,112 @@
 import SwiftUI
 
-// Central tab manager for controlling active tab loading
+// MARK: - Tab Swipe Active Environment Key
+// Used to suppress button press effects during tab swipe gestures
+
+private struct TabSwipeActiveKey: EnvironmentKey {
+    static let defaultValue: Bool = false
+}
+
+extension EnvironmentValues {
+    var isTabSwipeActive: Bool {
+        get { self[TabSwipeActiveKey.self] }
+        set { self[TabSwipeActiveKey.self] = newValue }
+    }
+}
+
+// MARK: - Tab Manager
+
 class TabManager: ObservableObject {
     static let shared = TabManager()
     @Published var activeTab: Int = 0
     private init() {}
 
-    func setActiveTab(_ tab: Int) {
-        activeTab = tab
+    func setActiveTab(_ tab: Int) { activeTab = tab }
+    func isTabActive(_ tab: Int) -> Bool { activeTab == tab }
+}
+
+// MARK: - Tab Bar Visibility Manager
+
+class TabBarVisibilityManager: ObservableObject {
+    static let shared = TabBarVisibilityManager()
+    @Published var isVisible: Bool = true
+    private var lastOffset: CGFloat = 0
+    private var hasInitialOffset = false
+    /// Accumulates small deltas before triggering show/hide
+    private var accumulatedDelta: CGFloat = 0
+    /// Debounce timer to prevent rapid show/hide toggling
+    private var debounceWorkItem: DispatchWorkItem?
+    private init() {}
+
+    func updateScrollOffset(_ offset: CGFloat) {
+        // First offset from a new scroll view — just store it, don't act
+        if !hasInitialOffset {
+            lastOffset = offset
+            hasInitialOffset = true
+            return
+        }
+
+        let delta = offset - lastOffset
+        lastOffset = offset
+
+        // Ignore large jumps (tab switches, first report, content reload)
+        guard abs(delta) < 100 else {
+            accumulatedDelta = 0
+            return
+        }
+
+        // Ignore tiny jitter
+        guard abs(delta) > 0.5 else { return }
+
+        // Accumulate delta in the same direction; reset on direction change
+        if (accumulatedDelta > 0 && delta < 0) || (accumulatedDelta < 0 && delta > 0) {
+            accumulatedDelta = delta
+        } else {
+            accumulatedDelta += delta
+        }
+
+        // Near the top — always show
+        if offset > -20 {
+            accumulatedDelta = 0
+            setVisible(true)
+            return
+        }
+
+        // Require substantial accumulated scroll before toggling
+        if accumulatedDelta < -100 {
+            setVisible(false)
+            accumulatedDelta = 0
+        } else if accumulatedDelta > 60 {
+            setVisible(true)
+            accumulatedDelta = 0
+        }
     }
 
-    func isTabActive(_ tab: Int) -> Bool {
-        return activeTab == tab
+    func resetForTabSwitch() {
+        lastOffset = 0
+        hasInitialOffset = false
+        accumulatedDelta = 0
+        debounceWorkItem?.cancel()
+        show()
+    }
+
+    func show() { setVisible(true) }
+
+    private func setVisible(_ visible: Bool) {
+        guard isVisible != visible else { return }
+        // Cancel any pending toggle
+        debounceWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.isVisible != visible else { return }
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { self.isVisible = visible }
+        }
+        debounceWorkItem = work
+        // Small debounce to prevent rapid toggling
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: work)
     }
 }
+
+// MARK: - Main Tab View
 
 struct MainTabView: View {
     @Environment(\.appTheme) private var theme
@@ -22,145 +115,164 @@ struct MainTabView: View {
     @StateObject private var tabManager = TabManager.shared
     @StateObject private var userManager = UserManager.shared
     @StateObject private var toastManager = ToastManager.shared
-    @State private var dragOffset: CGFloat = 0
+    @StateObject private var themeManager = ThemeManager.shared
+    @StateObject private var tabBarVisibility = TabBarVisibilityManager.shared
     @StateObject private var bannerDragState = BannerDragState.shared
-    
+
+    // Drag state
+    @State private var dragOffset: CGFloat = 0
+    @State private var dragConfirmed = false
+    // Track if any touch is down to suppress button press effects
+    @State private var touchDown = false
+
+    private var neighborTab: Int? {
+        guard dragOffset != 0 else { return nil }
+        return dragOffset < 0 ? (selectedTab + 1) % 4 : (selectedTab - 1 + 4) % 4
+    }
+
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Top App Bar - Fixed layout with consistent centering
-                VStack(spacing: 0) {
-                    HStack {
-                        // Profile button (left) - shows user photo when signed in
-                        Button {
-                            showSettings = true
-                        } label: {
-                            if userManager.isSignedIn, let profileImageURL = userManager.profileImageURL,
-                               let url = URL(string: profileImageURL) {
-                                // Show actual user profile picture
-                                AsyncImage(url: url) { image in
-                                    image
-                                        .resizable()
-                                        .aspectRatio(contentMode: .fill)
-                                        .frame(width: 32, height: 32)
-                                        .clipShape(Circle())
-                                } placeholder: {
-                                    Image(systemName: "person.circle.fill")
-                                        .font(.title2)
-                                        .foregroundColor(theme.onSurface)
-                                }
-                            } else {
-                                // Show default icon when not signed in or no profile picture
-                                Image(systemName: userManager.isSignedIn ? "person.circle.fill" : "person.circle")
+                // ── Top App Bar ─────────────────────────────────────────
+                HStack {
+                    Button { showSettings = true } label: {
+                        if userManager.isSignedIn,
+                           let urlStr = userManager.profileImageURL,
+                           let url = URL(string: urlStr) {
+                            AsyncImage(url: url) { image in
+                                image.resizable()
+                                    .aspectRatio(contentMode: .fill)
+                                    .frame(width: 32, height: 32)
+                                    .clipShape(Circle())
+                            } placeholder: {
+                                Image(systemName: "person.circle.fill")
                                     .font(.title2)
                                     .foregroundColor(theme.onSurface)
                             }
-                        }
-                        .frame(width: 44, height: 44) // Fixed frame for consistent layout
-                        
-                        Spacer()
-                        
-                        // Centered title - always centered regardless of tab
-                        Text("S25 Ultra Wallpapers")
-                            .font(.title3.bold())
-                            .foregroundColor(theme.onSurface)
-                        
-                        Spacer()
-                        
-                        // Sort button for Home and Trending tabs (right side)
-                        Group {
-                            if selectedTab == 0 {
-                                SortButtonForHome()
-                            } else if selectedTab == 2 {
-                                SortButtonForTrending()
-                            } else {
-                                // Empty placeholder to maintain layout balance
-                                Color.clear
-                                    .frame(width: 44, height: 44)
-                            }
+                        } else {
+                            Image(systemName: userManager.isSignedIn ? "person.circle.fill" : "person.circle")
+                                .font(.title2)
+                                .foregroundColor(theme.onSurface)
                         }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(theme.background)
-                    
-                    // Tab Bar with Liquid Glass
-                    HStack(spacing: 32) {
-                        TabButton(title: "Home", icon: "house", selectedTab: $selectedTab, tag: 0, dragOffset: $dragOffset)
-                        TabButton(title: "Categories", icon: "square.grid.2x2", selectedTab: $selectedTab, tag: 1, dragOffset: $dragOffset)
-                        TabButton(title: "Trending", icon: "flame", selectedTab: $selectedTab, tag: 2, dragOffset: $dragOffset)
-                        TabButton(title: "Favorites", icon: "heart", selectedTab: $selectedTab, tag: 3, dragOffset: $dragOffset)
-                    }
-                    .padding(.vertical, 8)
-                    .background(theme.background)
-                    
-                    Divider()
-                        .background(theme.surfaceVariant)
-                }
-                    
-                    // Content — all tabs stay alive (opacity-based) to preserve scroll position
-                    GeometryReader { geometry in
-                        let screenWidth = geometry.size.width
+                    .frame(width: 44, height: 44)
 
-                        ZStack {
+                    Spacer()
+
+                    Text("S25 Ultra Wallpapers")
+                        .font(.title3.bold())
+                        .foregroundColor(theme.onSurface)
+
+                    Spacer()
+
+                    Color.clear.frame(width: 44, height: 44) // balance
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(theme.background)
+
+                Divider().background(theme.surfaceVariant)
+
+                // ── Tab Content ─────────────────────────────────────────
+                GeometryReader { geo in
+                    let sw = geo.size.width
+                    let progress = sw > 0 ? min(abs(dragOffset) / sw, 1.0) : 0
+
+                    ZStack {
+                        // All tabs kept alive; only the active one is interactive
+                        Group {
                             HomeScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
+                                .frame(width: sw, height: geo.size.height)
                                 .opacity(selectedTab == 0 ? 1 : 0)
-                                .allowsHitTesting(selectedTab == 0)
+                                .allowsHitTesting(selectedTab == 0 && !dragConfirmed)
                             CategoriesScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
+                                .frame(width: sw, height: geo.size.height)
                                 .opacity(selectedTab == 1 ? 1 : 0)
-                                .allowsHitTesting(selectedTab == 1)
+                                .allowsHitTesting(selectedTab == 1 && !dragConfirmed)
                             TrendingScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
+                                .frame(width: sw, height: geo.size.height)
                                 .opacity(selectedTab == 2 ? 1 : 0)
-                                .allowsHitTesting(selectedTab == 2)
+                                .allowsHitTesting(selectedTab == 2 && !dragConfirmed)
                             FavoritesScreenContent()
-                                .frame(width: screenWidth, height: geometry.size.height)
+                                .frame(width: sw, height: geo.size.height)
                                 .opacity(selectedTab == 3 ? 1 : 0)
-                                .allowsHitTesting(selectedTab == 3)
+                                .allowsHitTesting(selectedTab == 3 && !dragConfirmed)
                         }
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 50)
-                                .onChanged { value in
-                                    guard !bannerDragState.isDragging else { return }
-                                    let horizontalAmount = abs(value.translation.width)
-                                    let verticalAmount = abs(value.translation.height)
-                                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 50 {
-                                        dragOffset = value.translation.width
-                                    }
-                                }
-                                .onEnded { value in
-                                    guard !bannerDragState.isDragging else {
-                                        dragOffset = 0
-                                        return
-                                    }
-                                    let horizontalAmount = abs(value.translation.width)
-                                    let verticalAmount = abs(value.translation.height)
-                                    if horizontalAmount > verticalAmount * 2 && horizontalAmount > 50 {
-                                        let threshold = screenWidth / 3
-                                        var newTab = selectedTab
-                                        if value.translation.width < -threshold {
-                                            newTab = min(selectedTab + 1, 3)
-                                        } else if value.translation.width > threshold {
-                                            newTab = max(selectedTab - 1, 0)
-                                        }
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                            selectedTab = newTab
-                                            dragOffset = 0
-                                        }
-                                    } else {
-                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                            dragOffset = 0
-                                        }
-                                    }
-                                }
-                        )
+                        // Pass drag/touch state to children so button styles can suppress press effects.
+                        // touchDown becomes true the instant a finger touches, BEFORE dragConfirmed.
+                        .environment(\.isTabSwipeActive, touchDown || dragConfirmed)
+                        // Parallax: active content slides at 30% of drag speed
+                        .offset(x: dragOffset * 0.3)
+
+                        // Neighbor slides in from the edge at 100% of drag speed
+                        if let neighbor = neighborTab, dragConfirmed {
+                            neighborView(for: neighbor)
+                                .frame(width: sw, height: geo.size.height)
+                                .offset(x: dragOffset < 0
+                                    ? sw + dragOffset
+                                    : -sw + dragOffset)
+                                .opacity(progress)
+                                .allowsHitTesting(false)
+                                .clipped()
+                        }
                     }
+                    .clipped()
+                    .simultaneousGesture(
+                        DragGesture(minimumDistance: 8)
+                            .onChanged { value in
+                                // Mark touch as down immediately
+                                if !touchDown { touchDown = true }
+
+                                guard !bannerDragState.isDragging else { return }
+                                let h = abs(value.translation.width)
+                                let v = abs(value.translation.height)
+
+                                if !dragConfirmed {
+                                    // Must be clearly horizontal
+                                    guard h > v * 1.3, h > 12 else { return }
+                                    dragConfirmed = true
+                                }
+                                if dragConfirmed {
+                                    dragOffset = value.translation.width
+                                }
+                            }
+                            .onEnded { value in
+                                touchDown = false
+                                let wasConfirmed = dragConfirmed
+
+                                guard wasConfirmed, !bannerDragState.isDragging else {
+                                    dragOffset = 0
+                                    dragConfirmed = false
+                                    return
+                                }
+
+                                let threshold = sw / 3
+                                var newTab = selectedTab
+                                if value.translation.width < -threshold {
+                                    newTab = (selectedTab + 1) % 4
+                                } else if value.translation.width > threshold {
+                                    newTab = (selectedTab - 1 + 4) % 4
+                                }
+
+                                withAnimation(.spring(response: 0.32, dampingFraction: 0.76)) {
+                                    dragOffset = 0
+                                    if newTab != selectedTab {
+                                        selectedTab = newTab
+                                    }
+                                }
+                                dragConfirmed = false
+
+                                if newTab != selectedTab {
+                                    TabBarVisibilityManager.shared.show()
+                                }
+                            }
+                    )
+                }
             }
             .background(theme.background.ignoresSafeArea())
             .onChange(of: selectedTab) { newTab in
                 tabManager.setActiveTab(newTab)
+                TabBarVisibilityManager.shared.resetForTabSwitch()
             }
             .onAppear {
                 tabManager.setActiveTab(selectedTab)
@@ -170,7 +282,27 @@ struct MainTabView: View {
         .navigationBarBackButtonHidden(false)
         .fullScreenCover(isPresented: $showSettings) {
             SettingsScreen()
+                .environment(\.appTheme, themeManager.theme)
         }
+        // ── Floating tab bar + sort accessory ───────────────────────
+        .overlay(alignment: .bottom) {
+            FloatingTabBarRow(selectedTab: $selectedTab, dragOffset: $dragOffset)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+                .offset(y: tabBarVisibility.isVisible ? 0 : 140)
+                .animation(.spring(response: 0.35, dampingFraction: 0.82), value: tabBarVisibility.isVisible)
+        }
+        // ── Scroll to top (only when tab bar is hidden) ─────────────
+        .overlay(alignment: .bottomTrailing) {
+            if !tabBarVisibility.isVisible {
+                ScrollToTopFloatingButton()
+                    .padding(.trailing, 20)
+                    .padding(.bottom, 28)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: tabBarVisibility.isVisible)
+        // ── Toast ────────────────────────────────────────────────────
         .overlay(alignment: .bottom) {
             if toastManager.showToast {
                 ToastView(
@@ -178,140 +310,312 @@ struct MainTabView: View {
                     type: toastManager.toastType,
                     isPresented: $toastManager.showToast
                 )
+                .padding(.bottom, 100)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func neighborView(for tab: Int) -> some View {
+        switch tab {
+        case 0: HomeScreenContent()
+        case 1: CategoriesScreenContent()
+        case 2: TrendingScreenContent()
+        case 3: FavoritesScreenContent()
+        default: EmptyView()
+        }
+    }
+}
+
+// MARK: - Scroll To Top Floating Button (matches tab bar style)
+
+struct ScrollToTopFloatingButton: View {
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Button {
+            // Fire the scroll-to-top — the tab bar will auto-show once
+            // the scroll view reaches the top (detected by ScrollOffsetObserver)
+            ScrollToTopNotifier.shared.scrollToTop()
+        } label: {
+            Image(systemName: "arrow.up")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(width: 52, height: 52)
+                .background {
+                    if #available(iOS 26.0, *) {
+                        Circle()
+                            .fill(Color.clear)
+                            .glassEffect(.regular, in: Circle())
+                    } else {
+                        Circle()
+                            .fill(colorScheme == .dark
+                                  ? Color.white.opacity(0.22)
+                                  : Color.black.opacity(0.08))
+                            .background(
+                                Circle()
+                                    .fill(.ultraThinMaterial)
+                            )
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 4)
+                            .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Shared notifier so MainTabView's scroll-to-top button can trigger
+/// scrolling in whichever tab is currently active.
+class ScrollToTopNotifier: ObservableObject {
+    static let shared = ScrollToTopNotifier()
+    @Published var trigger = false
+    private init() {}
+
+    func scrollToTop() {
+        trigger.toggle()
+    }
+}
+
+// MARK: - Floating Tab Bar Row (pill + optional sort button)
+
+struct FloatingTabBarRow: View {
+    @Binding var selectedTab: Int
+    @Binding var dragOffset: CGFloat
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            FloatingTabBar(selectedTab: $selectedTab, dragOffset: $dragOffset)
+
+            if selectedTab == 0 || selectedTab == 2 {
+                SortAccessoryButton(selectedTab: selectedTab)
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.28, dampingFraction: 0.72), value: selectedTab)
+    }
+}
+
+// MARK: - Floating Tab Bar Pill
+// Uses a semi-transparent solid color + ultraThinMaterial combo
+// to ensure visibility on both light AND dark wallpaper backgrounds.
+
+struct FloatingTabBar: View {
+    @Binding var selectedTab: Int
+    @Binding var dragOffset: CGFloat
+    @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let tabs: [(title: String, icon: String)] = [
+        ("Home",       "house"),
+        ("Categories", "square.grid.2x2"),
+        ("Trending",   "flame"),
+        ("Favorites",  "heart")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<tabs.count, id: \.self) { index in
+                FloatingTabButton(
+                    title: tabs[index].title,
+                    icon:  tabs[index].icon,
+                    tag:   index,
+                    selectedTab: $selectedTab,
+                    dragOffset:  $dragOffset
+                )
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 8)
+        .contentShape(Capsule())
+        .background {
+            if #available(iOS 26.0, *) {
+                Capsule()
+                    .fill(Color.clear)
+                    .glassEffect(.regular, in: Capsule())
+            } else {
+                // Layer: solid tinted base + blur material on top = always visible
+                ZStack {
+                    Capsule()
+                        .fill(colorScheme == .dark
+                              ? Color.white.opacity(0.18)
+                              : Color.black.opacity(0.06))
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                }
+                .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 4)
+                .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
             }
         }
     }
 }
 
-// Sort button for Home screen
-struct SortButtonForHome: View {
-    @Environment(\.appTheme) private var theme
-    @StateObject private var homeScreenState = HomeScreenState.shared
+// MARK: - Floating Tab Button
+// Unselected → icon only.  Selected → expanding pill with icon + label.
 
-    var body: some View {
-        Button {
-            homeScreenState.showSortSheet = true
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.title2)
-                .foregroundColor(theme.onSurface)
-        }
-        .frame(width: 44, height: 44)
-    }
-}
-
-// Sort button for Trending screen
-struct SortButtonForTrending: View {
-    @Environment(\.appTheme) private var theme
-    @StateObject private var trendingScreenState = TrendingScreenState.shared
-
-    var body: some View {
-        Button {
-            trendingScreenState.showSortSheet = true
-        } label: {
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.title2)
-                .foregroundColor(theme.onSurface)
-        }
-        .frame(width: 44, height: 44)
-    }
-}
-
-struct TabButton: View {
+struct FloatingTabButton: View {
     let title: String
     let icon: String
-    @Binding var selectedTab: Int
     let tag: Int
+    @Binding var selectedTab: Int
     @Binding var dragOffset: CGFloat
     @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var proximity: CGFloat {
+        let sw = UIScreen.main.bounds.width
+        guard sw > 0 else { return selectedTab == tag ? 1.0 : 0.0 }
+        let virtual = CGFloat(selectedTab) - (dragOffset / sw)
+        return max(0, 1.0 - abs(virtual - CGFloat(tag)))
+    }
+
+    private var isSelected: Bool { proximity > 0.5 }
 
     var body: some View {
         Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.76)) {
                 selectedTab = tag
                 dragOffset = 0
             }
+            TabBarVisibilityManager.shared.show()
         } label: {
-            VStack(spacing: 4) {
-                Image(systemName: selectedTab == tag ? "\(icon).fill" : icon)
-                    .font(.system(size: 20, weight: .medium))
-                Text(title)
-                    .font(.caption)
+            HStack(spacing: 6) {
+                ZStack {
+                    Image(systemName: icon)
+                        .opacity(isSelected ? 0 : 1)
+                    Image(systemName: "\(icon).fill")
+                        .opacity(isSelected ? 1 : 0)
+                }
+                .font(.system(size: 18, weight: .medium))
+                .foregroundColor(isSelected ? theme.primary : (colorScheme == .dark ? .white.opacity(0.8) : theme.onSurfaceVariant))
+
+                if isSelected {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(theme.primary)
+                        .fixedSize()
+                        .transition(.opacity.combined(with: .scale(scale: 0.75, anchor: .leading)))
+                }
             }
-            .foregroundColor(selectedTab == tag ? theme.primary : theme.onSurface)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.horizontal, isSelected ? 14 : 12)
+            .padding(.vertical, 10)
+            .contentShape(Capsule())
+            .background {
+                if isSelected {
+                    Capsule().fill(theme.primary.opacity(0.13))
+                }
+            }
+            .animation(.spring(response: 0.28, dampingFraction: 0.72), value: isSelected)
         }
-        .modifier(TabButtonGlassModifier(isSelected: selectedTab == tag))
+        .buttonStyle(.plain)
     }
 }
 
-struct TabButtonGlassModifier: ViewModifier {
-    let isSelected: Bool
+// MARK: - Sort Accessory Button
+
+private let tabBarHeight: CGFloat = 56
+
+struct SortAccessoryButton: View {
+    let selectedTab: Int
     @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var colorScheme
+    @StateObject private var homeState     = HomeScreenState.shared
+    @StateObject private var trendingState = TrendingScreenState.shared
 
-    func body(content: Content) -> some View {
-        if isSelected {
-            if #available(iOS 26.0, *) {
-                content.glassEffect(.regular.tint(theme.primary.opacity(0.2)).interactive(), in: RoundedRectangle(cornerRadius: 16))
-            } else {
-                content
-                    .background(theme.primary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
-        } else {
-            content
+    var body: some View {
+        Button {
+            if selectedTab == 0 { homeState.showSortSheet     = true }
+            if selectedTab == 2 { trendingState.showSortSheet  = true }
+        } label: {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(width: tabBarHeight, height: tabBarHeight)
+                .background {
+                    if #available(iOS 26.0, *) {
+                        Circle()
+                            .fill(Color.clear)
+                            .glassEffect(.regular, in: Circle())
+                    } else {
+                        ZStack {
+                            Circle()
+                                .fill(colorScheme == .dark
+                                      ? Color.white.opacity(0.18)
+                                      : Color.black.opacity(0.06))
+                            Circle()
+                                .fill(.ultraThinMaterial)
+                        }
+                        .shadow(color: .black.opacity(0.25), radius: 16, x: 0, y: 4)
+                        .overlay(Circle().stroke(Color.white.opacity(0.15), lineWidth: 0.5))
+                    }
+                }
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
     }
 }
 
-// HomeScreen wrapper
+// MARK: - Sort Buttons (used elsewhere if needed)
+
+struct SortButtonForHome: View {
+    @Environment(\.appTheme) private var theme
+    @StateObject private var homeScreenState = HomeScreenState.shared
+    var body: some View {
+        Button { homeScreenState.showSortSheet = true } label: {
+            Image(systemName: "arrow.up.arrow.down").font(.title2).foregroundColor(theme.onSurface)
+        }
+        .frame(width: 44, height: 44)
+    }
+}
+
+struct SortButtonForTrending: View {
+    @Environment(\.appTheme) private var theme
+    @StateObject private var trendingScreenState = TrendingScreenState.shared
+    var body: some View {
+        Button { trendingScreenState.showSortSheet = true } label: {
+            Image(systemName: "arrow.up.arrow.down").font(.title2).foregroundColor(theme.onSurface)
+        }
+        .frame(width: 44, height: 44)
+    }
+}
+
+// MARK: - Tab Content Wrappers
+
 struct HomeScreenContent: View {
-    var body: some View {
-        HomeScreen()
-            .environmentObject(HomeScreenState.shared)
-    }
+    var body: some View { HomeScreen().environmentObject(HomeScreenState.shared) }
 }
 
-// CategoriesScreen wrapper
 struct CategoriesScreenContent: View {
-    var body: some View {
-        CategoriesScreen()
-    }
+    var body: some View { CategoriesScreen() }
 }
 
-// TrendingScreen wrapper
 struct TrendingScreenContent: View {
-    var body: some View {
-        TrendingScreen()
-            .environmentObject(TrendingScreenState.shared)
-    }
+    var body: some View { TrendingScreen().environmentObject(TrendingScreenState.shared) }
 }
 
-// FavoritesScreen wrapper
 struct FavoritesScreenContent: View {
-    var body: some View {
-        FavoritesScreen()
-    }
+    var body: some View { FavoritesScreen() }
 }
 
-// Shared state for HomeScreen sort functionality
+// MARK: - Shared State
+
 class HomeScreenState: ObservableObject {
     static let shared = HomeScreenState()
     @Published var showSortSheet = false
     private init() {}
 }
 
-// Shared state to block tab swipe while banner is being dragged
 class BannerDragState: ObservableObject {
     static let shared = BannerDragState()
     @Published var isDragging = false
     private init() {}
 }
 
-// Shared state for TrendingScreen sort functionality
 class TrendingScreenState: ObservableObject {
     static let shared = TrendingScreenState()
     @Published var showSortSheet = false
     private init() {}
-} 
+}

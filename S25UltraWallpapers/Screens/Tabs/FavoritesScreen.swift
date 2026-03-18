@@ -6,6 +6,7 @@ struct FavoritesScreen: View {
     @Environment(\.appTheme) private var theme
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var scrollViewHelper = ScrollViewHelper()
+    @StateObject private var scrollToTopNotifier = ScrollToTopNotifier.shared
     @State private var showToast = false
     @State private var toastMessage = ""
     @State private var toastType: ToastView.ToastType = .info
@@ -18,18 +19,35 @@ struct FavoritesScreen: View {
             if favoritesManager.favorites.isEmpty {
                 EmptyStateViewFavorites()
             } else {
-                ScrollView(.vertical, showsIndicators: false) {
-                    PaginatedWallpaperGrid(
-                        wallpapers: favoritesManager.favorites,
-                        isLoading: false,
-                        hasReachedEnd: true,
-                        onLoadMore: {}
-                    )
-                    .environmentObject(FavoritesManager.shared)
-                    .padding(.vertical)
-                }
-                .refreshable {
-                    await refreshFavoritesData()
+                ScrollViewReader { scrollProxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        PaginatedWallpaperGrid(
+                            wallpapers: favoritesManager.favorites,
+                            isLoading: false,
+                            hasReachedEnd: true,
+                            onLoadMore: {}
+                        )
+                        .environmentObject(FavoritesManager.shared)
+                        .id("favoritesTop")
+                        .padding(.top)
+                        .padding(.bottom, 100) // clear floating tab bar
+                        .background(
+                            ScrollOffsetObserver { offset in
+                                TabBarVisibilityManager.shared.updateScrollOffset(offset)
+                                withAnimation {
+                                    scrollViewHelper.showScrollToTop = offset < -500
+                                }
+                            }
+                        )
+                    }
+                    .refreshable {
+                        await refreshFavoritesData()
+                    }
+                    .onChange(of: scrollToTopNotifier.trigger) { _ in
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            scrollProxy.scrollTo("favoritesTop", anchor: .top)
+                        }
+                    }
                 }
             }
             
@@ -49,14 +67,6 @@ struct FavoritesScreen: View {
                 }
             }
             
-            // Scroll to top button
-            if scrollViewHelper.showScrollToTop && !favoritesManager.favorites.isEmpty {
-                ScrollToTopButton {
-                    scrollViewHelper.shouldScrollToTop = true
-                }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
-            }
             
             // Toast
             if showToast {
@@ -73,7 +83,7 @@ struct FavoritesScreen: View {
                 hasLoaded = true
             }
         }
-        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
+        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : (themeManager.themeMode == .light ? .light : nil))
     }
     
     @MainActor
@@ -122,32 +132,31 @@ struct FavoritesScreen: View {
 
 private struct EmptyStateViewFavorites: View {
     @Environment(\.appTheme) var theme
-    
+
     var body: some View {
         VStack(spacing: 20) {
-            // Spacer pushes content down from the top
             Spacer()
-            
+
             Image(systemName: "heart.slash")
                 .font(.system(size: 64))
                 .foregroundColor(theme.onSurfaceVariant)
-            
+
             VStack(spacing: 12) {
                 Text("No favorites yet")
                     .font(AppFonts.display(20))
                     .foregroundColor(theme.onSurface)
-                
+
                 Text("Your favorite wallpapers will appear here")
                     .font(AppFonts.body())
                     .foregroundColor(theme.onSurfaceVariant)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal)
             }
-            
-            // Spacer pushes content up from the bottom
+
             Spacer()
         }
-        .frame(maxWidth: .infinity) // Ensure the VStack takes full width
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle()) // allow swipe gestures over empty area
     }
 }
 

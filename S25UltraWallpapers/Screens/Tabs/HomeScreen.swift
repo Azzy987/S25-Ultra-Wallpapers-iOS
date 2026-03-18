@@ -26,6 +26,7 @@ struct HomeScreen: View {
     @StateObject private var paginator: FirestorePaginator
     @State private var hasLoaded = false
     @StateObject private var scrollViewHelper = ScrollViewHelper()
+    @StateObject private var scrollToTopNotifier = ScrollToTopNotifier.shared
     @State private var showToast = false
     @State private var toastMessage = ""
     @State private var toastType: ToastView.ToastType = .info
@@ -39,6 +40,10 @@ struct HomeScreen: View {
     @State private var selectedSort: HomeSortOption = .releaseDate
     @State private var isLoadingWallpapers = false
     @State private var isScreenActive = false
+
+    // Task handles for cancellation on navigation away
+    @State private var loadTask: Task<Void, Never>?
+    @State private var diskCacheSaved = false
     
     init() {
         // Load saved sort preference - default to release date
@@ -56,16 +61,33 @@ struct HomeScreen: View {
     var body: some View {
         NavigationView {
         ZStack(alignment: .bottomTrailing) {
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVStack(spacing: 8) {
-                    bannerSection
-                    wallpaperSection
+            ScrollViewReader { scrollProxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVStack(spacing: 8) {
+                        Color.clear.frame(height: 0).id("homeTop")
+                        bannerSection
+                        wallpaperSection
+                    }
+                    .padding(.bottom, 100) // clear floating tab bar
+                    .background(
+                        ScrollOffsetObserver { offset in
+                            TabBarVisibilityManager.shared.updateScrollOffset(offset)
+                            withAnimation {
+                                scrollViewHelper.showScrollToTop = offset < -500
+                            }
+                        }
+                    )
+                }
+                .refreshable {
+                    await refreshHomeData()
+                }
+                .onChange(of: scrollToTopNotifier.trigger) { _ in
+                    withAnimation(.easeInOut(duration: 0.4)) {
+                        scrollProxy.scrollTo("homeTop", anchor: .top)
+                    }
                 }
             }
-            .refreshable {
-                await refreshHomeData()
-            }
-                
+
                 overlayContent
             }
         }
@@ -88,13 +110,22 @@ struct HomeScreen: View {
         .onDisappear {
             isScreenActive = false
             stopAutoScroll()
+            // Cancel in-flight load tasks when navigating away
+            loadTask?.cancel()
+            loadTask = nil
+        }
+        .onChange(of: paginator.wallpapers.count) { count in
+            // Save to disk cache once when the first page of wallpapers arrives
+            guard !diskCacheSaved, count > 0 else { return }
+            diskCacheSaved = true
+            WallpaperDiskCache.shared.save(paginator.wallpapers, forKey: WallpaperDiskCache.homeKey)
         }
         .onChange(of: paginator.isLoading) { loading in
             if !loading {
                 isLoadingWallpapers = false
             }
         }
-        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : .light)
+        .preferredColorScheme(themeManager.themeMode == .dark ? .dark : (themeManager.themeMode == .light ? .light : nil))
     }
 
     @ViewBuilder
@@ -404,15 +435,6 @@ struct HomeScreen: View {
             
     @ViewBuilder
     private var overlayContent: some View {
-            if scrollViewHelper.showScrollToTop {
-                ScrollToTopButton {
-                    scrollViewHelper.shouldScrollToTop = true
-                }
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
-                .transition(.scale.combined(with: .opacity))
-            }
-            
             if showToast {
                 ToastView(
                     message: toastMessage,
@@ -471,52 +493,85 @@ struct HomeScreen: View {
     }
     
     private func loadData() {
-        // Load banners
-        firebaseManager.fetchBanners {
-            self.cards = self.firebaseManager.banners.map { CarouselCard(from: $0) }
+        print("🏠 HomeScreen.loadData() started")
+        let startTime = Date()
+        
+        // IMMEDIATE: Show hasLoaded to prevent multiple calls
+        hasLoaded = true
+        
+        // Load banners asynchronously (non-blocking) — store handle for cancellation
+        loadTask?.cancel()
+        loadTask = Task {
+            print("🎨 Fetching banners...")
+            let bannerStart = Date()
             
-            // Preload wallpaper data for all banners to enable instant navigation
-            self.preloadBannerWallpapers()
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                firebaseManager.fetchBanners {
+                    continuation.resume()
+                }
+            }
             
-            // Set initial index to first banner
-            if !self.cards.isEmpty {
-                self.currentIndex = 0
+            await MainActor.run {
+                self.cards = self.firebaseManager.banners.map { CarouselCard(from: $0) }
+                print("✅ Banners loaded in \(Date().timeIntervalSince(bannerStart))s, count: \(self.cards.count)")
                 
-                // Start auto-scroll only if we have more than one card
-                if self.cards.count > 1 && self.isScreenActive {
-                    self.startAutoScroll()
+                // Preload wallpaper data in background (non-blocking)
+                Task.detached(priority: .background) {
+                    await self.preloadBannerWallpapers()
+                }
+                
+                // Set initial index
+                if !self.cards.isEmpty {
+                    self.currentIndex = 0
+                    if self.cards.count > 1 && self.isScreenActive {
+                        self.startAutoScroll()
+                    }
                 }
             }
         }
         
-        // Load trending wallpapers to ensure banner navigation works
-        firebaseManager.fetchTrendingWallpapers()
+        // Load trending wallpapers in parallel (non-blocking)
+        Task.detached(priority: .background) {
+            print("🔥 Fetching trending wallpapers...")
+            await FirebaseManager.shared.fetchTrendingWallpapersAsync()
+        }
         
-        // Load wallpapers only if screen is active
+        // Load wallpapers only if screen is active (non-blocking)
         if isScreenActive {
-            isLoadingWallpapers = true
-            paginator.loadInitialWallpapers()
+            Task {
+                print("📱 Loading initial wallpapers...")
+                let wallpaperStart = Date()
+                
+                await MainActor.run {
+                    self.isLoadingWallpapers = true
+                    self.paginator.loadInitialWallpapers()
+                }
+                
+                print("✅ Initial wallpapers loading started in \(Date().timeIntervalSince(wallpaperStart))s")
+            }
         }
 
-        hasLoaded = true
+        print("🎯 HomeScreen.loadData() setup complete in \(Date().timeIntervalSince(startTime))s")
     }
 
-    private func preloadBannerWallpapers() {
+    private func preloadBannerWallpapers() async {
+        print("🔄 Preloading \(cards.count) banner wallpapers...")
+        let start = Date()
+        
         // Preload wallpaper data for all banners in background for instant access
         for card in cards {
             // Try Samsung collection first
-            firebaseManager.db.collection("Samsung").document(card.id).getDocument(source: .default) { document, error in
-                if let document = document, document.exists {
-                    // Document is now cached for instant access
-                    return
-                }
-                
-                // Try TrendingWallpapers collection
-                self.firebaseManager.db.collection("TrendingWallpapers").document(card.id).getDocument(source: .default) { document, error in
-                    // Document is now cached for instant access
-                }
-            }
+            _ = try? await firebaseManager.db.collection("Samsung")
+                .document(card.id)
+                .getDocument(source: .default)
+            
+            // Try TrendingWallpapers collection if not found
+            _ = try? await firebaseManager.db.collection("TrendingWallpapers")
+                .document(card.id)
+                .getDocument(source: .default)
         }
+        
+        print("✅ Preload complete in \(Date().timeIntervalSince(start))s")
     }
     
     @MainActor
@@ -528,7 +583,11 @@ struct HomeScreen: View {
         await withCheckedContinuation { continuation in
             firebaseManager.fetchBanners {
                 self.cards = self.firebaseManager.banners.map { CarouselCard(from: $0) }
-                self.preloadBannerWallpapers()
+                
+                // Preload in background (non-blocking)
+                Task.detached(priority: .background) {
+                    await self.preloadBannerWallpapers()
+                }
                 
                 if !self.cards.isEmpty {
                     self.currentIndex = 0
@@ -559,6 +618,9 @@ struct HomeScreen: View {
     
     private func applySortAndReload() {
         isLoadingWallpapers = true
+
+        // Scroll to top immediately so when new results arrive the user sees them
+        scrollToTopNotifier.scrollToTop()
 
         // Create new query with selected sort
         let newQuery = FirebaseManager.shared.db.collection("Samsung")
