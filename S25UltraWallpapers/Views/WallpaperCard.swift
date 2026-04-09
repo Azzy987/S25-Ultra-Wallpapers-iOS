@@ -126,7 +126,7 @@ struct WallpaperCard: View {
             .background(theme.surface)
             .clipShape(RoundedRectangle(cornerRadius: 24))
             .shadow(color: theme.onSurface.opacity(0.15), radius: 8, x: 0, y: 4)
-            .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)
+            .shadow(color: theme.onSurface.opacity(0.08), radius: 2, x: 0, y: 1)   
 
             // Favorite hit area
             Color.clear

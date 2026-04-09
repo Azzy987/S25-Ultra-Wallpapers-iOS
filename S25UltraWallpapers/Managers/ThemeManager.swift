@@ -24,29 +24,20 @@ class ThemeManager: ObservableObject {
     }
     
     private func setupThemeObserver() {
-        // Observer for system theme changes when using system mode
+        // System appearance changes are handled by RootView via @Environment(\.colorScheme).
+        // This observer handles the case where the app returns to foreground with a
+        // changed system appearance while in system mode.
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(systemThemeChanged),
+            selector: #selector(appDidBecomeActive),
             name: UIApplication.didBecomeActiveNotification,
             object: nil
         )
-        
-        // Observer for trait collection changes
-        if #available(iOS 13.0, *) {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(systemThemeChanged),
-                name: NSNotification.Name("UIApplicationDidChangeStatusBarOrientationNotification"),
-                object: nil
-            )
-        }
     }
-    
-    @objc private func systemThemeChanged() {
-        if themeMode == .system {
-            updateTheme()
-        }
+
+    @objc private func appDidBecomeActive() {
+        // Re-sync is handled by RootView's .onAppear / .onChange(of: systemColorScheme).
+        // Nothing needed here — kept for potential future use.
     }
     
     deinit {
@@ -54,45 +45,39 @@ class ThemeManager: ObservableObject {
         NotificationCenter.default.removeObserver(self)
     }
     
-    func updateTheme() {
+    /// Called by RootView whenever SwiftUI's colorScheme environment changes.
+    /// This is the authoritative source for system appearance — no trait collection polling needed.
+    func applySystemColorScheme(_ colorScheme: ColorScheme) {
         withAnimation(.easeInOut(duration: 0.3)) {
-            let newTheme: AppColorScheme
-            
-            switch themeMode {
-            case .system:
-                // Follow system appearance
-                if #available(iOS 13.0, *) {
-                    let userInterfaceStyle = UIScreen.main.traitCollection.userInterfaceStyle
-                    newTheme = (userInterfaceStyle == .dark) ? AppColors.dark : AppColors.light
-                } else {
-                    newTheme = AppColors.light // Fallback for older iOS versions
-                }
-            case .dark:
-                newTheme = AppColors.dark
-            case .light:
-                newTheme = AppColors.light
-            }
-            
-            theme = newTheme
+            theme = colorScheme == .dark ? AppColors.dark : AppColors.light
         }
     }
-    
+
+    func updateTheme() {
+        // For explicit light/dark modes we know the theme immediately.
+        // For system mode, RootView drives the theme via applySystemColorScheme(_:).
+        switch themeMode {
+        case .dark:
+            withAnimation(.easeInOut(duration: 0.3)) { theme = AppColors.dark }
+        case .light:
+            withAnimation(.easeInOut(duration: 0.3)) { theme = AppColors.light }
+        case .system:
+            break // RootView will call applySystemColorScheme after preferredColorScheme(nil) takes effect
+        }
+    }
+
     private static func getInitialTheme() -> AppColorScheme {
         let themeMode = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "themeMode") ?? "system") ?? .system
-        
         switch themeMode {
+        case .dark:   return AppColors.dark
+        case .light:  return AppColors.light
         case .system:
-            // Follow system appearance
-            if #available(iOS 13.0, *) {
-                let userInterfaceStyle = UIScreen.main.traitCollection.userInterfaceStyle
-                return (userInterfaceStyle == .dark) ? AppColors.dark : AppColors.light
-            } else {
-                return AppColors.light // Fallback for older iOS versions
-            }
-        case .dark:
-            return AppColors.dark
-        case .light:
-            return AppColors.light
+            // Best-effort at init time before SwiftUI environment is available
+            let style = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.windows.first?.traitCollection.userInterfaceStyle
+                ?? UIScreen.main.traitCollection.userInterfaceStyle
+            return style == .dark ? AppColors.dark : AppColors.light
         }
     }
 }

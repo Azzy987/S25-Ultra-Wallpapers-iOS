@@ -3,9 +3,10 @@ import SwiftUI
 struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appTheme) private var theme
+    @Environment(\.colorScheme) private var systemColorScheme
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var settingsViewModel = SettingsViewModel()
-    
+
     var body: some View {
         NavigationView {
             ScrollView {
@@ -44,8 +45,11 @@ struct SettingsScreen: View {
                         dismiss()
                     } label: {
                         Image(systemName: "chevron.left")
-                            .font(.title2)
+                            .font(.system(size: 16, weight: .semibold))
                             .foregroundColor(theme.onSurface)
+                            .padding(9)
+                            .background(theme.onSurface.opacity(0.08))
+                            .clipShape(Circle())
                     }
                 }
             }
@@ -53,18 +57,22 @@ struct SettingsScreen: View {
         }
         .navigationViewStyle(.stack)
         .preferredColorScheme(themeManager.themeMode == .dark ? .dark : (themeManager.themeMode == .light ? .light : nil))
+        .onChange(of: systemColorScheme) { newScheme in
+            if themeManager.themeMode == .system {
+                themeManager.applySystemColorScheme(newScheme)
+            }
+        }
+        .onAppear {
+            if themeManager.themeMode == .system {
+                themeManager.applySystemColorScheme(systemColorScheme)
+            }
+        }
         // Sheet presentations for dialogs
         .sheet(isPresented: $settingsViewModel.showingPrivacyPolicy) {
-            ContentDialog(
-                title: "Privacy Policy",
-                content: settingsViewModel.privacyPolicyText
-            )
+            PrivacyPolicySheet()
         }
         .sheet(isPresented: $settingsViewModel.showingTermsOfUse) {
-            ContentDialog(
-                title: "Terms of Use", 
-                content: settingsViewModel.termsOfUseText
-            )
+            TermsOfUseSheet()
         }
         .sheet(isPresented: $settingsViewModel.showingAboutLicenses) {
             ContentDialog(

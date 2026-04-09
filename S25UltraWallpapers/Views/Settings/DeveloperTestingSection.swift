@@ -6,7 +6,7 @@ import SwiftUI
 
 struct DeveloperTestingSection: View {
     @StateObject private var userManager = UserManager.shared
-    @StateObject private var pricingManager = PremiumPricingManager.shared
+    @StateObject private var rcManager = RevenueCatManager.shared
     @Environment(\.appTheme) private var theme
     
     var body: some View {
@@ -100,34 +100,39 @@ struct DeveloperTestingSection: View {
     private var pricingStatusCard: some View {
         VStack(spacing: 8) {
             HStack {
-                Text("Firebase Pricing")
+                Text("RevenueCat Offering")
                     .font(.subheadline.bold())
                     .foregroundColor(theme.onSurface)
                 Spacer()
-                
-                Text(pricingManager.pricingData != nil ? "LOADED" : "LOADING")
+                Text(rcManager.currentOffering != nil ? "LOADED" : "LOADING")
                     .font(.caption.bold())
                     .foregroundColor(.white)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(pricingManager.pricingData != nil ? Color.green : Color.orange)
+                    .background(rcManager.currentOffering != nil ? Color.green : Color.orange)
                     .cornerRadius(8)
             }
-            
-            if let pricingData = pricingManager.pricingData {
+            if let offering = rcManager.currentOffering {
                 VStack(alignment: .leading, spacing: 4) {
-                    pricingRow("Monthly", pricingData.monthly)
-                    pricingRow("Yearly", pricingData.yearly)  
-                    pricingRow("Lifetime", pricingData.lifetime)
+                    Text("Offering: \(offering.identifier)")
+                        .font(.caption)
+                        .foregroundColor(theme.onSurfaceVariant)
+                    ForEach(offering.availablePackages, id: \.identifier) { pkg in
+                        HStack {
+                            Text(pkg.storeProduct.localizedTitle)
+                                .font(.caption)
+                                .foregroundColor(theme.onSurface)
+                            Spacer()
+                            Text(pkg.storeProduct.localizedPriceString)
+                                .font(.caption.bold())
+                                .foregroundColor(theme.primary)
+                        }
+                    }
                 }
-            } else if pricingManager.isLoading {
-                ProgressView("Loading pricing...")
+            } else {
+                Text("Pro entitlement: \(rcManager.isPro ? "ACTIVE" : "inactive")")
                     .font(.caption)
                     .foregroundColor(theme.onSurfaceVariant)
-            } else if let error = pricingManager.errorMessage {
-                Text("Error: \(error)")
-                    .font(.caption)
-                    .foregroundColor(.red)
             }
         }
         .padding()
@@ -136,34 +141,6 @@ struct DeveloperTestingSection: View {
                 .fill(theme.surface)
                 .shadow(color: theme.onSurface.opacity(0.1), radius: 2, x: 0, y: 1)
         )
-    }
-    
-    @ViewBuilder
-    private func pricingRow(_ title: String, _ tier: PremiumPricingManager.PricingData.PricingTier) -> some View {
-        HStack {
-            Text("\(title):")
-                .font(.caption)
-                .foregroundColor(theme.onSurfaceVariant)
-            
-            Text(tier.formattedOriginalPrice)
-                .font(.caption)
-                .foregroundColor(theme.onSurfaceVariant)
-                .strikethrough()
-            
-            Text("→")
-                .font(.caption)
-                .foregroundColor(theme.onSurfaceVariant)
-            
-            Text(tier.formattedDiscountedPrice)
-                .font(.caption.bold())
-                .foregroundColor(theme.primary)
-            
-            Text("(\(tier.discountPercentage)% off)")
-                .font(.caption)
-                .foregroundColor(.green)
-            
-            Spacer()
-        }
     }
     
     @ViewBuilder

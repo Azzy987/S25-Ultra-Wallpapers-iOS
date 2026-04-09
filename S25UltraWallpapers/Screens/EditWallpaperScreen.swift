@@ -145,8 +145,11 @@ struct EditWallpaperScreen: View {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.title2)
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(theme.onSurface)
+                    .padding(9)
+                    .background(theme.onSurface.opacity(0.08))
+                    .clipShape(Circle())
             }
             .padding(.leading, 20)
 
@@ -159,9 +162,9 @@ struct EditWallpaperScreen: View {
             Spacer()
 
             // Invisible placeholder to balance the layout
-            Image(systemName: "xmark")
-                .font(.title2)
-                .foregroundColor(.clear)
+            Circle()
+                .fill(Color.clear)
+                .frame(width: 36, height: 36)
                 .padding(.trailing, 20)
         }
         .padding(.vertical, 16)
@@ -170,18 +173,8 @@ struct EditWallpaperScreen: View {
     
     private var imagePreview: some View {
         VStack(spacing: 12) {
-            if isProcessing {
-                VStack(spacing: 16) {
-                    ProgressView()
-                        .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
-                        .scaleEffect(1.2)
-                    
-                    Text("Processing...")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundColor(theme.onSurfaceVariant)
-                }
-                .frame(maxWidth: .infinity, minHeight: 300)
-            } else {
+            ZStack {
+                // Always show current image (processed or original) as placeholder
                 Image(uiImage: displayImage)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -193,10 +186,29 @@ struct EditWallpaperScreen: View {
                     .animation(.easeInOut(duration: 0.3), value: isFlippedHorizontally)
                     .animation(.easeInOut(duration: 0.3), value: isFlippedVertically)
                     .animation(.easeInOut(duration: 0.3), value: rotationAngle)
+                
+                // Show processing overlay on top when processing
+                if isProcessing {
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.black.opacity(0.5))
+                        .frame(maxWidth: .infinity, minHeight: 300, maxHeight: 400)
+                        .overlay(
+                            VStack(spacing: 16) {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(1.5)
+                                
+                                Text("Applying filter...")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(.white)
+                            }
+                        )
+                        .transition(.opacity)
+                }
             }
         }
         .padding(.horizontal, 32)
-        .padding(.vertical, 8) // Reduced vertical padding
+        .padding(.vertical, 8)
     }
     
     private var editOptionsToolbar: some View {

@@ -46,6 +46,8 @@ struct WallpaperDetailScreen: View {
     @State private var previousWallpaperImage: UIImage?
     @State private var isLoadingNextPreview = false
     @State private var isLoadingPreviousPreview = false
+    @State private var nextPreviewTask: Task<Void, Never>?
+    @State private var previousPreviewTask: Task<Void, Never>?
     @State private var showControls = true // Controls visibility state
     
     // Initializer
@@ -330,6 +332,9 @@ struct WallpaperDetailScreen: View {
             .onDisappear {
                 // Hide any active toasts when leaving the detail screen
                 toastManager.hideToast()
+                // Cancel in-flight preview loads
+                nextPreviewTask?.cancel()
+                previousPreviewTask?.cancel()
             }
         }
         .navigationBarHidden(true)
@@ -341,15 +346,15 @@ struct WallpaperDetailScreen: View {
             if showDownloadSuccess {
                 DownloadSuccessDialog(
                     isPresented: $showDownloadSuccess,
-                    wallpaperName: currentWallpaper.wallpaperName
+                    wallpaperName: currentWallpaper.wallpaperName,
+                    onDismiss: {
+                        // Show interstitial ad after dialog is dismissed
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                            adManager.showInterstitialAd {}
+                        }
+                    }
                 )
                 .transition(AnyTransition.opacity.animation(.easeInOut))
-                .onChange(of: showDownloadSuccess) { isShowing in
-                    // Show interstitial ad after dialog is dismissed
-                    if !isShowing {
-                        adManager.showInterstitialAd {}
-                    }
-                }
             } else if isDownloading {
                 // Progress indicator during download
                 HStack(spacing: 12) {
@@ -421,25 +426,29 @@ struct WallpaperDetailScreen: View {
     private func loadMainImage() {
         isMainImageLoading = true
 
-        // Step 1: Show thumbnail immediately if it's already in cache (fast path)
         let thumbnailUrl = currentWallpaper.thumbnail.isEmpty ? currentWallpaper.imageUrl : currentWallpaper.thumbnail
         let thumbURL = URL(string: thumbnailUrl)
+        let imageUrl = currentWallpaper.imageUrl
 
-        // Try multiple cache layers for thumbnail
-        let thumbImage: UIImage? = ImageCache.shared.getUIImage(for: thumbURL)
-            ?? (thumbURL.flatMap { URLCache.shared.cachedResponse(for: URLRequest(url: $0)) }.flatMap { UIImage(data: $0.data) })
+        // Step 1: Decode thumbnail on background thread (cache hit fast path)
+        Task.detached(priority: .userInitiated) {
+            let thumbImage: UIImage? = ImageCache.shared.getUIImage(for: thumbURL)
+                ?? (thumbURL.flatMap { URLCache.shared.cachedResponse(for: URLRequest(url: $0)) }
+                    .flatMap { UIImage(data: $0.data) })
 
-        if let thumbImage = thumbImage {
-            // Show thumbnail immediately while full-res loads in background
-            self.mainImage = thumbImage
-            self.isMainImageLoaded = true
-            self.isMainImageLoading = false
+            if let thumbImage {
+                await MainActor.run {
+                    self.mainImage = thumbImage
+                    self.isMainImageLoaded = true
+                    self.isMainImageLoading = false
+                }
+            }
         }
 
-        // Step 2: Load full-res image (cached or download)
-        loadCachedImage(from: currentWallpaper.imageUrl) { image in
+        // Step 2: Load full-res image (cached or download) — must run on MainActor
+        loadCachedImage(from: imageUrl) { image in
             DispatchQueue.main.async {
-                if let image = image {
+                if let image {
                     withAnimation(.easeIn(duration: 0.3)) {
                         self.mainImage = image
                         self.isMainImageLoaded = true
@@ -472,25 +481,25 @@ struct WallpaperDetailScreen: View {
     }
     
     private func loadPreviewImage(for wallpaper: Wallpaper?, isNext: Bool) {
-        guard let wallpaper = wallpaper else { 
-            return 
-        }
-        guard let url = URL(string: wallpaper.imageUrl) else { 
-            return 
-        }
-        
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let data = data, let image = UIImage(data: data) {
-                DispatchQueue.main.async {
-                    if isNext {
-                        self.nextWallpaperImage = image
-                    } else {
-                        self.previousWallpaperImage = image
-                    }
-                }
-            } else {
+        guard let wallpaper = wallpaper, let url = URL(string: wallpaper.imageUrl) else { return }
+
+        if isNext {
+            nextPreviewTask?.cancel()
+            nextPreviewTask = Task {
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      !Task.isCancelled,
+                      let image = UIImage(data: data) else { return }
+                await MainActor.run { nextWallpaperImage = image }
             }
-        }.resume()
+        } else {
+            previousPreviewTask?.cancel()
+            previousPreviewTask = Task {
+                guard let (data, _) = try? await URLSession.shared.data(from: url),
+                      !Task.isCancelled,
+                      let image = UIImage(data: data) else { return }
+                await MainActor.run { previousWallpaperImage = image }
+            }
+        }
     }
     
     private func shareWallpaper() {
@@ -539,16 +548,22 @@ struct WallpaperDetailScreen: View {
             }
 
             DispatchQueue.main.async {
+                // Hide "Preparing to share..." toast immediately before showing share sheet
+                self.toastManager.hideToast()
+                
                 let activityVC = UIActivityViewController(
                     activityItems: [fileURL],
                     applicationActivities: nil
                 )
                 activityVC.excludedActivityTypes = [.assignToContact, .addToReadingList]
-                activityVC.completionWithItemsHandler = { _, _, _, _ in
+                activityVC.completionWithItemsHandler = { _, completed, _, _ in
                     try? FileManager.default.removeItem(at: fileURL)
                     DispatchQueue.main.async {
                         self.isSharing = false
-                        self.adManager.showInterstitialAd {}
+                        // Only show ad if user actually completed the share
+                        if completed {
+                            self.adManager.showInterstitialAd {}
+                        }
                     }
                 }
 
@@ -569,6 +584,8 @@ struct WallpaperDetailScreen: View {
                     popover.sourceRect = CGRect(x: window.bounds.midX, y: window.bounds.midY, width: 0, height: 0)
                 }
 
+                // Dismiss isSharing immediately when presenting share sheet
+                self.isSharing = false
                 topVC.present(activityVC, animated: true)
             }
         }

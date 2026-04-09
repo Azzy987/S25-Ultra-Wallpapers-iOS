@@ -23,14 +23,13 @@ struct PaginatedWallpaperGridWithAds: View {
 
     private let adInterval: Int = 16
 
-    private var groups: [GridGroup] {
-        buildGroups(showAds: adManager.shouldShowAds())
-    }
+    @State private var cachedGroups: [GridGroup] = []
+    @State private var cachedShowAds: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
             LazyVStack(spacing: 16) {
-                ForEach(groups) { group in
+                ForEach(cachedGroups) { group in
                     switch group {
                     case .wallpaperRow(let wallpapers):
                         HStack(spacing: interItemSpacing) {
@@ -113,6 +112,19 @@ struct PaginatedWallpaperGridWithAds: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 40)
             }
+        }
+        .onAppear {
+            let showAds = adManager.shouldShowAds()
+            cachedShowAds = showAds
+            cachedGroups = buildGroups(showAds: showAds)
+        }
+        .onChange(of: wallpapers.count) { _ in
+            cachedGroups = buildGroups(showAds: cachedShowAds)
+        }
+        .onReceive(UserManager.shared.$isPremium) { _ in
+            let showAds = adManager.shouldShowAds()
+            cachedShowAds = showAds
+            cachedGroups = buildGroups(showAds: showAds)
         }
     }
 

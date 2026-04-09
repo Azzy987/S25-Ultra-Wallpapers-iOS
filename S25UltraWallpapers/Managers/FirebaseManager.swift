@@ -10,10 +10,14 @@ class FirebaseManager: ObservableObject {
     @Published var banners: [Banner] = []
     @Published var categories: [Category] = []
     @Published var trendingWallpapers: [Wallpaper] = []
+    @Published var paywallBanners: [String] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isInitialized = false
     
     private init() {
+        print("🔥 FirebaseManager: Initializing...")
+        let start = Date()
+        
         // Configure Firestore settings BEFORE accessing the instance
         // Use persistent disk cache so wallpapers load instantly on subsequent launches
         let settings = FirestoreSettings()
@@ -24,40 +28,152 @@ class FirebaseManager: ObservableObject {
         // Enable network first for faster loading
         Firestore.firestore().enableNetwork { error in
             if let error = error {
-                print("❌ Firebase network error: \(error)")
+                AppLogger.error(AppLogger.firebase, "Firebase network error: \(error)")
             } else {
+                print("✅ Firebase network enabled in \(Date().timeIntervalSince(start))s")
             }
         }
+        
+        print("✅ FirebaseManager initialized in \(Date().timeIntervalSince(start))s")
     }
     
     func initialize() {
+        print("🚀 FirebaseManager.initialize() called")
         fetchHomeData()
     }
     
     func fetchHomeData() {
-        guard wallpapers.isEmpty else { return }
+        print("📊 FirebaseManager.fetchHomeData() started")
+        let startTime = Date()
+
+        // Mark as initialized immediately to prevent blocking the UI
+        DispatchQueue.main.async {
+            self.isInitialized = true
+            print("✅ App marked as initialized (UI unblocked) - \(Date().timeIntervalSince(startTime))s")
+        }
+
+        // Skip if already loaded
+        guard wallpapers.isEmpty else {
+            print("⏭️ Data already loaded, skipping fetch")
+            return
+        }
+
+        // 1. Load disk cache immediately on main thread substitute
+        WallpaperDiskCache.shared.loadAsync(forKey: WallpaperDiskCache.homeKey) { [weak self] cached in
+            if let cached = cached, !cached.isEmpty {
+                self?.wallpapers = cached
+                print("📀 Disk cache hit: \(cached.count) home wallpapers")
+            }
+        }
+        WallpaperDiskCache.shared.loadAsync(forKey: WallpaperDiskCache.trendingKey) { [weak self] cached in
+            if let cached = cached, !cached.isEmpty {
+                self?.trendingWallpapers = cached
+                print("📀 Disk cache hit: \(cached.count) trending wallpapers")
+            }
+        }
+
         isLoading = true
 
-        let group = DispatchGroup()
+        // 2. Fetch from network in background, refresh only if data changed
+        Task {
+            print("🔄 Starting parallel data fetch...")
+            let taskStart = Date()
 
-        group.enter()
-        fetchWallpapers {
-            group.leave()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    let start = Date()
+                    await self.fetchWallpapersAsync()
+                    print("✅ Wallpapers loaded in \(Date().timeIntervalSince(start))s")
+                }
+                group.addTask {
+                    let start = Date()
+                    await self.fetchBannersAsync()
+                    print("✅ Banners loaded in \(Date().timeIntervalSince(start))s")
+                }
+                group.addTask {
+                    let start = Date()
+                    await self.fetchTrendingWallpapersAsync()
+                    print("✅ Trending loaded in \(Date().timeIntervalSince(start))s")
+                }
+            }
+
+            await MainActor.run {
+                self.isLoading = false
+                print("🎉 All data loaded in \(Date().timeIntervalSince(taskStart))s")
+                print("📈 Total time from start: \(Date().timeIntervalSince(startTime))s")
+            }
         }
+    }
+    
+    // Async versions for parallel loading
+    private func fetchWallpapersAsync() async {
+        do {
+            // Use Firestore cache first, fall back to server
+            let snapshot: QuerySnapshot
+            do {
+                snapshot = try await db.collection("Samsung")
+                    .order(by: "timestamp", descending: true)
+                    .limit(to: PaginationUtils.PAGE_SIZE)
+                    .getDocuments(source: .cache)
+            } catch {
+                snapshot = try await db.collection("Samsung")
+                    .order(by: "timestamp", descending: true)
+                    .limit(to: PaginationUtils.PAGE_SIZE)
+                    .getDocuments(source: .server)
+            }
 
-        group.enter()
-        fetchBanners {
-            group.leave()
+            let loaded = snapshot.documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
+            await MainActor.run { self.wallpapers = loaded }
+
+            // Save first page to disk cache (only if changed)
+            if !loaded.isEmpty {
+                WallpaperDiskCache.shared.save(loaded, forKey: WallpaperDiskCache.homeKey)
+            }
+        } catch {
+            AppLogger.error(AppLogger.firebase, "fetchWallpapersAsync failed: \(error.localizedDescription)")
         }
+    }
 
-        group.enter()
-        fetchTrendingWallpapers {
-            group.leave()
+    private func fetchBannersAsync() async {
+        do {
+            let snapshot = try await db.collection("Banners")
+                .document("SamsungWallpapers")
+                .collection("S25UltraWallpapersBanners")
+                .getDocuments()
+            
+            await MainActor.run {
+                self.banners = snapshot.documents.map { doc in
+                    Banner(id: doc.documentID, data: doc.data())
+                }
+            }
+        } catch {
+            AppLogger.error(AppLogger.firebase, "fetchBannersAsync failed: \(error.localizedDescription)")
         }
+    }
+    
+    func fetchTrendingWallpapersAsync() async {
+        do {
+            let snapshot: QuerySnapshot
+            do {
+                snapshot = try await db.collection("TrendingWallpapers")
+                    .order(by: "timestamp", descending: true)
+                    .limit(to: PaginationUtils.PAGE_SIZE)
+                    .getDocuments(source: .cache)
+            } catch {
+                snapshot = try await db.collection("TrendingWallpapers")
+                    .order(by: "timestamp", descending: true)
+                    .limit(to: PaginationUtils.PAGE_SIZE)
+                    .getDocuments(source: .server)
+            }
 
-        group.notify(queue: .main) {
-            self.isLoading = false
-            self.isInitialized = true
+            let loaded = snapshot.documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
+            await MainActor.run { self.trendingWallpapers = loaded }
+
+            if !loaded.isEmpty {
+                WallpaperDiskCache.shared.save(loaded, forKey: WallpaperDiskCache.trendingKey)
+            }
+        } catch {
+            AppLogger.error(AppLogger.firebase, "fetchTrendingWallpapersAsync failed: \(error.localizedDescription)")
         }
     }
     
@@ -66,7 +182,7 @@ class FirebaseManager: ObservableObject {
             .order(by: "timestamp", descending: true)
             .getDocuments { snapshot, error in
                 if let error = error {
-                    print("❌ Error fetching wallpapers: \(error)")
+                    AppLogger.error(AppLogger.firebase, "fetchWallpapers failed: \(error.localizedDescription)")
                     DispatchQueue.main.async { completion() }
                     return
                 }
@@ -87,7 +203,7 @@ class FirebaseManager: ObservableObject {
             .collection("S25UltraWallpapersBanners")
             .getDocuments { snapshot, error in
                 if let error = error {
-                    print("❌ Error fetching banners: \(error)")
+                    AppLogger.error(AppLogger.firebase, "fetchBanners failed: \(error.localizedDescription)")
                     DispatchQueue.main.async { completion() }
                     return
                 }
@@ -105,7 +221,7 @@ class FirebaseManager: ObservableObject {
     func fetchCategories() {
         db.collection("Categories").getDocuments { snapshot, error in
             if let error = error {
-                print("❌ Error fetching categories: \(error)")
+                AppLogger.error(AppLogger.firebase, "fetchCategories failed: \(error.localizedDescription)")
                 return
             }
             
@@ -123,7 +239,7 @@ class FirebaseManager: ObservableObject {
             .limit(to: limit)
             .getDocuments { snapshot, error in
                 if let error = error {
-                    print("Error fetching trending wallpapers: \(error)")
+                    AppLogger.error(AppLogger.firebase, "fetchTrendingWallpapers failed: \(error.localizedDescription)")
                     DispatchQueue.main.async { completion() }
                     return
                 }
@@ -161,6 +277,17 @@ class FirebaseManager: ObservableObject {
         }
 
         return Wallpaper(id: document.documentID, data: data)
+    }
+
+    func loadPaywallBanners() {
+        guard paywallBanners.isEmpty else { return }
+        db.collection("PaywallWallpapers").getDocuments { [weak self] snapshot, error in
+            guard let documents = snapshot?.documents, error == nil else { return }
+            let urls = documents.compactMap { $0.data()["wallpaperUrl"] as? String }
+            DispatchQueue.main.async {
+                self?.paywallBanners = urls
+            }
+        }
     }
 
 }

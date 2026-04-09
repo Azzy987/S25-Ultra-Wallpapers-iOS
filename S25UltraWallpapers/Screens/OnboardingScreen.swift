@@ -90,6 +90,7 @@ struct OnboardingScreen: View {
         }
         .ignoresSafeArea(.all) // Full screen including status bar and home indicator
         .onAppear {
+            print("⏱️ [Startup] OnboardingScreen appeared")
             withAnimation(.easeInOut(duration: 0.8)) {
                 backgroundImageAlpha = 1.0
             }

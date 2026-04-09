@@ -129,7 +129,7 @@ struct CategoryScreen: View {
             }
         }
         .background(theme.background)
-        .navigationBarHidden(true)
+    .navigationBarHidden(true)
         .fullScreenCover(isPresented: $showDetail) {
             if let wallpaper = selectedWallpaper {
                 WallpaperDetailScreen(
@@ -160,26 +160,34 @@ struct CategoryScreen: View {
                 dismiss()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.title2)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.onSurface)
+                    .padding(9)
+                    .background(theme.onSurface.opacity(0.08))
+                    .clipShape(Circle())
             }
-            
+
             Text(category.name)
                 .font(.title3.bold())
                 .frame(maxWidth: .infinity, alignment: .center)
-            
+
             // Filter button for Samsung categories
             if category.categoryType == "brand" && category.name == "Samsung" {
                 Button {
                     showSeriesFilter = true
                 } label: {
                     Image(systemName: "line.horizontal.3.decrease.circle")
-                        .font(.title2)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+                        .padding(9)
+                        .background(theme.onSurface.opacity(0.08))
+                        .clipShape(Circle())
                 }
             } else {
                 // Invisible placeholder to balance the layout
-                Image(systemName: "chevron.left")
-                    .font(.title2)
-                    .opacity(0)
+                Circle()
+                    .fill(Color.clear)
+                    .frame(width: 36, height: 36)
             }
         }
         .foregroundColor(theme.onSurface)

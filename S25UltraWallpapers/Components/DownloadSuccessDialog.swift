@@ -4,6 +4,7 @@ struct DownloadSuccessDialog: View {
     @Environment(\.appTheme) private var theme
     @Binding var isPresented: Bool
     let wallpaperName: String
+    var onDismiss: (() -> Void)? = nil
     
     var body: some View {
         ZStack {
@@ -35,6 +36,7 @@ struct DownloadSuccessDialog: View {
                             UIApplication.shared.open(url)
                         }
                         isPresented = false
+                        onDismiss?()
                     } label: {
                         Text("View in Photos")
                             .font(.headline)
@@ -44,9 +46,10 @@ struct DownloadSuccessDialog: View {
                             .background(theme.primary)
                             .cornerRadius(12)
                     }
-                    
+
                     Button {
                         isPresented = false
+                        onDismiss?()
                     } label: {
                         Text("Close")
                             .font(.headline)

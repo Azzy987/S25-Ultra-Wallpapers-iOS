@@ -16,9 +16,14 @@ class AdCacheManager: NSObject, ObservableObject {
     // Cache configuration
     private let maxCachedAds = 10 // Maximum number of cached ads
     private let preloadDistance = 3 // Preload ads 3 positions ahead
-    
-    // Cache storage
-    private var nativeAdCache: [Int: NativeAd] = [:]
+
+    // Cache storage — NSCache with count limit ensures LRU eviction on memory pressure
+    private let nativeAdCache: NSCache<NSNumber, NativeAd> = {
+        let cache = NSCache<NSNumber, NativeAd>()
+        cache.countLimit = 10
+        return cache
+    }()
+    private var cachedPositionKeys: [Int] = [] // tracks insertion order for distance eviction
     private var adLoaders: [Int: AdLoader] = [:]
     private var adLoadingStates: [Int: Bool] = [:]
     
@@ -38,11 +43,11 @@ class AdCacheManager: NSObject, ObservableObject {
     // MARK: - Cache Management
     
     func getCachedAd(for position: Int) -> NativeAd? {
-        return nativeAdCache[position]
+        return nativeAdCache.object(forKey: NSNumber(value: position))
     }
-    
+
     func isAdCached(for position: Int) -> Bool {
-        return nativeAdCache[position] != nil
+        return nativeAdCache.object(forKey: NSNumber(value: position)) != nil
     }
     
     func isAdLoading(for position: Int) -> Bool {
@@ -117,8 +122,8 @@ class AdCacheManager: NSObject, ObservableObject {
     
     private func cleanupDistantAds(currentPosition: Int) {
         let cleanupDistance = maxCachedAds / 2
-        let positions = Array(nativeAdCache.keys)
-        
+        let positions = cachedPositionKeys
+
         for position in positions {
             let distance = abs(position - currentPosition)
             if distance > cleanupDistance {
@@ -128,7 +133,8 @@ class AdCacheManager: NSObject, ObservableObject {
     }
     
     private func removeAdFromCache(position: Int) {
-        nativeAdCache.removeValue(forKey: position)
+        nativeAdCache.removeObject(forKey: NSNumber(value: position))
+        cachedPositionKeys.removeAll { $0 == position }
         adLoadingStates.removeValue(forKey: position)
         adLoaders.removeValue(forKey: position)
         
@@ -141,7 +147,8 @@ class AdCacheManager: NSObject, ObservableObject {
     }
     
     func clearCache() {
-        nativeAdCache.removeAll()
+        nativeAdCache.removeAllObjects()
+        cachedPositionKeys.removeAll()
         adLoadingStates.removeAll()
         adLoaders.removeAll()
         
@@ -166,8 +173,11 @@ extension AdCacheManager: NativeAdLoaderDelegate {
         
         print("✅ Native ad loaded for position \(position)")
         
-        // Cache the ad
-        nativeAdCache[position] = nativeAd
+        // Cache the ad (insertion-ordered key list preserves eviction order)
+        nativeAdCache.setObject(nativeAd, forKey: NSNumber(value: position))
+        if !cachedPositionKeys.contains(position) {
+            cachedPositionKeys.append(position)
+        }
         
         // Update loading state
         adLoadingStates[position] = false
@@ -234,11 +244,11 @@ struct CachedNativeAdView: View {
     var body: some View {
         Group {
             if adManager.shouldShowAds() {
-                if cacheManager.isAdCached(for: position) {
+                if let nativeAd = cacheManager.getCachedAd(for: position) {
                     CachedNativeAdRepresentable(
                         position: position,
                         height: max(height, 320),
-                        nativeAd: cacheManager.getCachedAd(for: position)!
+                        nativeAd: nativeAd
                     )
                     .frame(height: max(height, 320))
                     .background(theme.surface)

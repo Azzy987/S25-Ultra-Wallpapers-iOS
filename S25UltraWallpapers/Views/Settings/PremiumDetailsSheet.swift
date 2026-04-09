@@ -1,12 +1,19 @@
 import SwiftUI
+import RevenueCat
+import RevenueCatUI
 
 // MARK: - Premium Details Sheet
 struct PremiumDetailsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.appTheme) private var theme
     @StateObject private var userManager = UserManager.shared
+    @StateObject private var rcManager = RevenueCatManager.shared
     @State private var showCancelConfirmation = false
     @State private var isCancelling = false
+    @State private var showCustomerCenter = false
+    @State private var isRestoring = false
+    @State private var showRestoreAlert = false
+    @State private var restoreAlertMessage = ""
     
     var body: some View {
         NavigationView {
@@ -48,6 +55,14 @@ struct PremiumDetailsSheet: View {
             }
         } message: {
             Text("Are you sure you want to cancel your premium subscription? You'll lose access to premium features.")
+        }
+        .alert("Restore Purchases", isPresented: $showRestoreAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(restoreAlertMessage)
+        }
+        .sheet(isPresented: $showCustomerCenter) {
+            CustomerCenterView()
         }
     }
     
@@ -209,18 +224,54 @@ struct PremiumDetailsSheet: View {
             VStack(spacing: 12) {
                 // Restore Purchases Button
                 Button(action: {
-                    // Restore purchases functionality
-                    print("🔄 Restoring purchases...")
+                    isRestoring = true
+                    Task {
+                        do {
+                            try await rcManager.restorePurchases()
+                            restoreAlertMessage = rcManager.isPro
+                                ? "Your purchases have been restored successfully!"
+                                : "No active purchases found for this Apple ID."
+                        } catch {
+                            restoreAlertMessage = error.localizedDescription
+                        }
+                        isRestoring = false
+                        showRestoreAlert = true
+                    }
                 }) {
                     HStack {
-                        Image(systemName: "arrow.clockwise.circle")
-                            .foregroundColor(theme.primary)
-                        
-                        Text("Restore Purchases")
+                        if isRestoring {
+                            ProgressView()
+                                .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+                                .scaleEffect(0.8)
+                        } else {
+                            Image(systemName: "arrow.clockwise.circle")
+                                .foregroundColor(theme.primary)
+                        }
+                        Text(isRestoring ? "Restoring..." : "Restore Purchases")
                             .foregroundColor(theme.onSurface)
-                        
                         Spacer()
-                        
+                        if !isRestoring {
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(theme.onSurfaceVariant)
+                        }
+                    }
+                    .padding()
+                }
+                .disabled(isRestoring)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.surfaceVariant.opacity(0.5))
+                )
+
+                // Manage Subscription via Customer Center
+                Button(action: { showCustomerCenter = true }) {
+                    HStack {
+                        Image(systemName: "person.circle")
+                            .foregroundColor(theme.primary)
+                        Text("Manage Subscription")
+                            .foregroundColor(theme.onSurface)
+                        Spacer()
                         Image(systemName: "chevron.right")
                             .font(.caption)
                             .foregroundColor(theme.onSurfaceVariant)
@@ -231,41 +282,6 @@ struct PremiumDetailsSheet: View {
                     RoundedRectangle(cornerRadius: 8)
                         .fill(theme.surfaceVariant.opacity(0.5))
                 )
-                
-                // Cancel Subscription Button (only for non-lifetime)
-                if userManager.premiumType != .lifetime {
-                    Button(action: {
-                        showCancelConfirmation = true
-                    }) {
-                        HStack {
-                            if isCancelling {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .red))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "xmark.circle")
-                                    .foregroundColor(.red)
-                            }
-                            
-                            Text(isCancelling ? "Cancelling..." : "Cancel Subscription")
-                                .foregroundColor(.red)
-                            
-                            Spacer()
-                            
-                            if !isCancelling {
-                                Image(systemName: "chevron.right")
-                                    .font(.caption)
-                                    .foregroundColor(.red.opacity(0.7))
-                            }
-                        }
-                        .padding()
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color.red.opacity(0.1))
-                    )
-                    .disabled(isCancelling)
-                }
             }
             .background(
                 RoundedRectangle(cornerRadius: 12)
@@ -284,29 +300,11 @@ struct PremiumDetailsSheet: View {
     }
     
     // MARK: - Actions
-    
+
     private func cancelPremiumSubscription() {
-        isCancelling = true
-        
-        // Simulate cancellation process
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
-            // Reset premium status locally and in Firebase
-            Task {
-                await FirebaseUserDataManager.shared.updatePremiumStatus(
-                    premium: false,
-                    premiumType: nil,
-                    premiumSince: nil,
-                    premiumExpiry: nil
-                )
-            }
-            
-            // Update local UserManager
-            userManager.updatePremiumStatus(type: .none)
-            
-            isCancelling = false
-            print("❌ Premium subscription cancelled")
-            dismiss()
-        }
+        // Cancellation is handled through Apple's subscription management
+        // opened via the Customer Center sheet.
+        showCustomerCenter = true
     }
 }
 

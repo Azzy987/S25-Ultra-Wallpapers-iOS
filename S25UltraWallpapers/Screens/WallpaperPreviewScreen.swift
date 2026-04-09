@@ -13,9 +13,7 @@ struct WallpaperPreviewScreen: View {
 
     // State for displaying the live time on the lock screen
     @State private var currentTime = Date()
-    
-    // Timer to update the time every second
-    let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var timerCancellable: AnyCancellable?
     
     enum PreviewMode: String, CaseIterable {
         case lockScreen = "Lock"
@@ -156,9 +154,13 @@ struct WallpaperPreviewScreen: View {
         )
         .onAppear {
             loadWallpaperImage()
+            timerCancellable = Timer.publish(every: 1, on: .main, in: .common)
+                .autoconnect()
+                .sink { input in currentTime = input }
         }
-        .onReceive(timer) { input in
-            currentTime = input
+        .onDisappear {
+            timerCancellable?.cancel()
+            timerCancellable = nil
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea(.all)
@@ -477,37 +479,29 @@ struct WallpaperPreviewScreen: View {
             isLoading = false
             return
         }
-        
+
         // Check cache first
-        let cache = URLCache.shared
         let request = URLRequest(url: url)
-        
-        if let cachedResponse = cache.cachedResponse(for: request),
+        if let cachedResponse = URLCache.shared.cachedResponse(for: request),
            let image = UIImage(data: cachedResponse.data) {
-            DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.5)) {
-                    self.wallpaperImage = image
-                    self.isLoading = false
-                }
+            withAnimation(.easeInOut(duration: 0.5)) {
+                wallpaperImage = image
+                isLoading = false
             }
             return
         }
-        
-        // Download if not cached
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            if let data = data, let image = UIImage(data: data) {
-                DispatchQueue.main.async {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        self.wallpaperImage = image
-                        self.isLoading = false
-                    }
-                }
-            } else {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                }
+
+        Task {
+            guard let (data, _) = try? await URLSession.shared.data(from: url),
+                  let image = UIImage(data: data) else {
+                isLoading = false
+                return
             }
-        }.resume()
+            withAnimation(.easeInOut(duration: 0.5)) {
+                wallpaperImage = image
+                isLoading = false
+            }
+        }
     }
 }
 

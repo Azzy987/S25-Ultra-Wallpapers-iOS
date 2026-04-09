@@ -113,7 +113,7 @@ class FirestorePaginator: ObservableObject {
         baseQuery
             .start(afterDocument: lastDocument)
             .limit(to: pageSize)
-            .getDocuments(source: .default) { [weak self] snapshot, error in // Use cache-first strategy
+            .getDocuments(source: .server) { [weak self] snapshot, error in // Pagination always from server
                 guard let self = self else { return }
                 
                 DispatchQueue.main.async {
@@ -131,15 +131,16 @@ class FirestorePaginator: ObservableObject {
                     }
                     
                     let newWallpapers = documents.map { Wallpaper(id: $0.documentID, data: $0.data()) }
-                    
+
                     // Avoid duplicate wallpapers
                     let existingIds = Set(self.wallpapers.map { $0.id })
                     let uniqueNewWallpapers = newWallpapers.filter { !existingIds.contains($0.id) }
-                    
+
                     self.wallpapers.append(contentsOf: uniqueNewWallpapers)
                     self.lastDocument = documents.last
                     self.hasMoreData = documents.count == self.pageSize
                     self.hasReachedEnd = !self.hasMoreData
+                    self.errorMessage = nil
                 }
             }
     }

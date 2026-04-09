@@ -62,14 +62,22 @@ class ImageCache {
     private var cache: NSCache<NSURL, AnyObject> = NSCache()
     // Secondary cache for UIImage — used by WallpaperDetailScreen.loadCachedImage()
     private var uiImageCache: NSCache<NSURL, UIImage> = NSCache()
-    private let maxMemoryUsage: Int = 100 * 1024 * 1024 // 100MB for better caching
-    private let maxItemCount: Int = 200 // More items for category thumbnails
+    // 50MB memory limit (precious for wallpaper app); 200MB disk via URLCache
+    private let maxMemoryUsage: Int = 50 * 1024 * 1024  // 50MB
+    private let maxItemCount: Int = 150
 
     private init() {
         cache.totalCostLimit = maxMemoryUsage
         cache.countLimit = maxItemCount
         uiImageCache.totalCostLimit = maxMemoryUsage
         uiImageCache.countLimit = maxItemCount
+
+        // Configure URLCache for 200MB disk, 50MB memory
+        URLCache.shared = URLCache(
+            memoryCapacity: 50 * 1024 * 1024,   // 50MB
+            diskCapacity: 200 * 1024 * 1024,     // 200MB
+            diskPath: "wallpaper_image_cache"
+        )
 
         // Clear cache when receiving memory warning
         NotificationCenter.default.addObserver(

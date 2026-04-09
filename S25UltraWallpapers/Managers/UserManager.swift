@@ -2,6 +2,8 @@ import SwiftUI
 import FirebaseAuth
 import GoogleSignIn
 import Firebase
+import AuthenticationServices
+import CryptoKit
 
 @MainActor
 class UserManager: ObservableObject {
@@ -18,6 +20,8 @@ class UserManager: ObservableObject {
     @Published var premiumExpiryDate: Date? = nil
     
     private var authStateHandle: AuthStateDidChangeListenerHandle?
+    // Apple Sign-In nonce
+    private var currentNonce: String?
     
     enum PremiumType: String, CaseIterable {
         case none = "None"
@@ -128,6 +132,8 @@ class UserManager: ObservableObject {
                     self?.updateUserState(user: authResult?.user)
                     // Sync user data with Firebase
                     await FirebaseUserDataManager.shared.syncUserDataOnSignIn()
+                    // Login to RevenueCat with Firebase UID
+                    await RevenueCatManager.shared.loginWithFirebaseUID()
                 }
             }
         }
@@ -145,17 +151,89 @@ class UserManager: ObservableObject {
         do {
             // Sign out from Firebase
             try Auth.auth().signOut()
-            
+
             // Sign out from Google
             GIDSignIn.sharedInstance.signOut()
-            
+
             // Clear premium status when signing out
             clearPremiumStatusOnSignOut()
-            
+
+            // Log out from RevenueCat (revert to anonymous)
+            Task { await RevenueCatManager.shared.logout() }
+
             print("📱 User signed out successfully")
         } catch {
             print("📱 Error signing out: \(error.localizedDescription)")
         }
+    }
+
+    // MARK: - Sign in with Apple
+
+    /// Returns a configured ASAuthorizationAppleIDRequest with a fresh nonce.
+    func appleSignInRequest() -> ASAuthorizationAppleIDRequest {
+        let nonce = randomNonceString()
+        currentNonce = nonce
+        let provider = ASAuthorizationAppleIDProvider()
+        let request = provider.createRequest()
+        request.requestedScopes = [.fullName, .email]
+        request.nonce = sha256(nonce)
+        return request
+    }
+
+    /// Call this from the ASAuthorizationControllerDelegate result.
+    func handleAppleSignInResult(_ result: Result<ASAuthorization, Error>) {
+        switch result {
+        case .failure(let error):
+            print("❌ Apple Sign-In error: \(error.localizedDescription)")
+        case .success(let auth):
+            guard
+                let appleCredential = auth.credential as? ASAuthorizationAppleIDCredential,
+                let nonce = currentNonce,
+                let identityTokenData = appleCredential.identityToken,
+                let identityToken = String(data: identityTokenData, encoding: .utf8)
+            else {
+                print("❌ Apple Sign-In: missing credential data")
+                return
+            }
+
+            let credential = OAuthProvider.appleCredential(
+                withIDToken: identityToken,
+                rawNonce: nonce,
+                fullName: appleCredential.fullName
+            )
+
+            Auth.auth().signIn(with: credential) { [weak self] authResult, error in
+                if let error = error {
+                    print("❌ Firebase Apple sign-in error: \(error.localizedDescription)")
+                    return
+                }
+                print("✅ Successfully signed in with Apple")
+                Task { @MainActor in
+                    self?.updateUserState(user: authResult?.user)
+                    await FirebaseUserDataManager.shared.syncUserDataOnSignIn()
+                    await RevenueCatManager.shared.loginWithFirebaseUID()
+                }
+            }
+        }
+    }
+
+    // MARK: - Apple Sign-In Crypto Helpers
+
+    private func randomNonceString(length: Int = 32) -> String {
+        precondition(length > 0)
+        var randomBytes = [UInt8](repeating: 0, count: length)
+        let errorCode = SecRandomCopyBytes(kSecRandomDefault, randomBytes.count, &randomBytes)
+        if errorCode != errSecSuccess {
+            fatalError("Unable to generate nonce: \(errorCode)")
+        }
+        let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
+        return String(randomBytes.map { byte in charset[Int(byte) % charset.count] })
+    }
+
+    private func sha256(_ input: String) -> String {
+        let inputData = Data(input.utf8)
+        let hashed = SHA256.hash(data: inputData)
+        return hashed.compactMap { String(format: "%02x", $0) }.joined()
     }
     
     func updatePremiumStatus(type: PremiumType, activeSince: Date? = nil, expiryDate: Date? = nil) {

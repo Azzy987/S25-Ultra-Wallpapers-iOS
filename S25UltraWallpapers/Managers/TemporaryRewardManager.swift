@@ -17,6 +17,7 @@ class TemporaryRewardManager: ObservableObject {
     
     private let premiumDownloadsKey = "temporary_premium_downloads"
     private let adFreeExpiryKey = "temporary_adfree_expiry"
+    private var expiryCheckTimer: Timer?
     
     private init() {
         loadSavedRewards()
@@ -61,7 +62,8 @@ class TemporaryRewardManager: ObservableObject {
         isAdFreeActive = true
         
         UserDefaults.standard.set(expiryDate, forKey: adFreeExpiryKey)
-        
+        startTimerForAdFreeMode()
+
         // Show success message
         let hours = Int(duration / 3600)
         let minutes = Int((duration.truncatingRemainder(dividingBy: 3600)) / 60)
@@ -128,16 +130,20 @@ class TemporaryRewardManager: ObservableObject {
     }
     
     private func startTimerForAdFreeMode() {
-        Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
-            if let expiryDate = self.adFreeExpiryDate, Date() > expiryDate {
-                // Ad-free mode expired
-                self.isAdFreeActive = false
-                self.adFreeExpiryDate = nil
-                UserDefaults.standard.removeObject(forKey: self.adFreeExpiryKey)
-                
-                print("⏰ Ad-free mode expired")
-            }
+        expiryCheckTimer?.invalidate()
+        expiryCheckTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            self?.checkAdFreeExpiry()
         }
+    }
+
+    private func checkAdFreeExpiry() {
+        guard let expiryDate = adFreeExpiryDate, Date() > expiryDate else { return }
+        isAdFreeActive = false
+        adFreeExpiryDate = nil
+        UserDefaults.standard.removeObject(forKey: adFreeExpiryKey)
+        expiryCheckTimer?.invalidate()
+        expiryCheckTimer = nil
+        print("⏰ Ad-free mode expired")
     }
     
     // MARK: - Debug Methods
